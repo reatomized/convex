@@ -11,6 +11,24 @@ export type {
   ReatomQueryOptions,
   Transition,
 } from "./client.js";
+export {
+  withConvexAction,
+  withConvexMutation,
+  withConvexPaginatedQuery,
+  withConvexQuery,
+} from "./extensions.js";
+export type {
+  ConvexActionOptions,
+  ConvexCallAction,
+  ConvexCallArgs,
+  ConvexClientSource,
+  ConvexMutationOptions,
+  ConvexPaginatedQueryExt,
+  ConvexPaginatedQueryOptions,
+  ConvexPaginatedQueryStatus,
+  ConvexQueryExt,
+  ConvexQueryStatus,
+} from "./extensions.js";
 export type { AuthTokenFetcher } from "./auth.js";
 export { reatomAuthState } from "./auth_state.js";
 export type {
