@@ -157,7 +157,7 @@ export interface ReatomConvexClientFake extends ReatomConvexClient {
    * Requests still run while it is `false`.
    */
   readonly connected: Atom<boolean>;
-  /** Functions called without a handler, once each. */
+  /** Functions called without a handler in the current frame, once each. */
   readonly unhandled: readonly MissingHandlerError[];
   /**
    * Answer `query` with `handler`, replacing an earlier one. Queries using it
@@ -232,11 +232,12 @@ export function reatomConvexClientFake(
     ReadonlyArray<{ type: "mutation" | "action"; at: Date }>
   >([], `${name}._inflight`);
 
-  const unhandled: MissingHandlerError[] = [];
+  const unhandled = atom((): MissingHandlerError[] => [], `${name}._unhandled`);
   const miss = (type: FunctionType, udfPath: string) => {
     const error = new MissingHandlerError(type, udfPath);
-    if (!unhandled.some((seen) => seen.message === error.message)) {
-      unhandled.push(error);
+    const missing = peek(unhandled);
+    if (!missing.some((seen) => seen.message === error.message)) {
+      missing.push(error);
       // A second channel: app code may catch the throw and show it as a
       // server failure.
       // eslint-disable-next-line no-console
@@ -407,10 +408,17 @@ export function reatomConvexClientFake(
           token = null;
         }
         if (authVersion() !== version) return;
-        authToken.set(token ?? undefined);
-        identity.set(token ? identityFromToken(token) : null);
-        isAuthenticated.set(!!token);
-        onChange?.(!!token);
+        if (token === null || token === undefined) {
+          authToken.set(undefined);
+          identity.set(null);
+          isAuthenticated.set(false);
+          onChange?.(false);
+          return;
+        }
+        authToken.set(token);
+        identity.set(identityFromToken(token));
+        isAuthenticated.set(true);
+        onChange?.(true);
       };
       void wrap(accept, context())();
     },
@@ -462,7 +470,7 @@ export function reatomConvexClientFake(
     identity,
     connected,
     get unhandled() {
-      return unhandled;
+      return peek(unhandled);
     },
     query: (query, args) =>
       queryEntry(
