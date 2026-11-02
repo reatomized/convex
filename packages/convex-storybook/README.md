@@ -87,91 +87,42 @@ Storybook merges `parameters.convex` per key, so a story can set `auth` or
 
 ## A story
 
-The access gate in
-[convex-demo](https://github.com/reatomized/convex-demo/blob/main/src/app/integration/Access.stories.tsx):
-a waiting account sees the waiting page, the admin approves it, and the team
-space opens. The members table is an atom, so its state is per story frame, and
-the approve handler updates the queries that read it.
+Stories should drive the UI through an actor. Keep atom and model assertions in
+unit tests. This example starts as the admin, clicks the visible approval
+button, and checks the updated account list:
 
 ```tsx
-import { atom, wrap } from "@reatom/core";
-
-const alex = {
-  _id: "alex" as Id<"members">,
-  email: "alex@example.com",
-  role: "member",
-  approved: false,
-};
-const olga = {
-  _id: "olga" as Id<"members">,
-  email: "olga@example.com",
-  role: "admin",
-  approved: true,
-};
-const asAlex = fakeIdentity("alex", { email: alex.email });
-const asOlga = fakeIdentity("olga", { email: olga.email });
-
-const members = atom<Member[]>([], "story.members");
-const accessOf = ({ role, approved }: Member) =>
-  role === "admin" ? "admin" : approved ? "approved" : "pending";
+import { button, createActor, heading, text } from "#shared/test";
+import { fakeIdentity } from "@reatomized/convex/testing";
 
 const meta = preview.meta({
   component: App,
   parameters: {
     initialPath: "team",
     convex: {
-      identity: asAlex,
-      setup: ({ convex }) => {
-        members.set([olga, alex]);
-        convex.handleQuery(api.access.viewer, (_args, { identity }) => {
-          const record = members().find((m) => m.email === identity?.email);
-          return record ? accessOf(record) : null;
-        });
-        convex.handleQuery(api.access.members, () => ({
-          pending: members().filter((m) => m.role === "member" && !m.approved),
-          approved: members().filter((m) => m.role === "member" && m.approved),
-        }));
-        convex.handleMutation(api.access.approve, ({ memberId }) => {
-          members.set((all) =>
-            all.map((m) => (m._id === memberId ? { ...m, approved: true } : m)),
-          );
-          return null;
-        });
-      },
+      identity: fakeIdentity("olga", { email: "olga@example.com" }),
+      // setupAccessFixture registers handlers backed by the story's fixture.
+      setup: setupAccessFixture,
     },
   },
   loaders: [(ctx) => I.init(ctx)],
 });
 export default meta;
 
-export const WaitsForApproval = meta.story();
+export const AdminManagesAccounts = meta.story();
 
-WaitsForApproval.test(
-  "opens the team space once the admin approves",
-  inStoryFrame(async ({ provider }) => {
-    await wrap(I.see(heading("Waiting for approval").wait()));
-
-    // The admin signs in on the same device and approves the account.
-    provider.identity.set(asOlga);
-    await wrap(I.click(button("Approve: alex@example.com").wait()));
-
-    provider.identity.set(asAlex);
-    await wrap(I.see(heading("Team space").wait()));
-  }),
-);
+AdminManagesAccounts.test("approves a waiting account", async () => {
+  await I.see(heading("Team space").wait());
+  await I.click(button("Approve: alex@example.com"));
+  await I.see(text("alex@example.com").within(heading("Approved")).wait());
+});
 ```
 
-`I` is a [kahraman](https://github.com/apphane-dev/kahraman) actor, and the
-click goes through the app's approve action and the fake's mutation.
-`inStoryFrame` runs a test in the story's frame and hands it the fakes; the same
-frame returns the same fakes:
-
-```ts
-const inStoryFrame =
-  (fn: (fake: ConvexStoryFake) => Promise<void>) =>
-  (story: ConvexStoryContext & { loaded: Record<string, unknown> }) =>
-    storyFrame(story).run(() => fn(convexStory(story)));
-```
+`I` is a [kahraman](https://github.com/apphane-dev/kahraman) actor. The click
+goes through the app's action and the fake mutation, so the test covers the same
+path a user takes. An app may keep a private frame helper for exceptional
+infrastructure tests that must switch identities in one frame. That helper is
+not the normal story API; direct atom and model assertions belong in unit tests.
 
 ## Missing handlers
 
