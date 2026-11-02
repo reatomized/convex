@@ -69,14 +69,14 @@ const createFake = ({
 
 /**
  * The story's fakes, built from `parameters.convex` in the current Reatom
- * frame. Call it where the app creates the story's frame, inside it, and put
- * the fakes where the app keeps its client. The same frame gets the same
- * fakes, so a rerender that keeps the frame keeps its state.
+ * frame. Call it inside the frame the app's Storybook setup starts per story,
+ * and put the fakes in the atom the app reads its client from, where
+ * production puts the real one. The same frame gets the same fakes, so a
+ * rerender that keeps the frame keeps its state.
  *
  * ```ts
  * frame.run(() => {
- *   const { convex, auth } = convexStory(story);
- *   backendAtom.set({ convex, auth });
+ *   convexAtom.set(convexStory(story).convex);
  * });
  * ```
  */
