@@ -22,7 +22,7 @@ jobs:
         run: npm ci --allow-remote=root
 
       - name: Build
-        run: npm run build --workspace @reatomized/convex-storybook
+        run: npm run build
 
       - name: Publish preview
         run: npx pkg-pr-new publish packages/convex-storybook
