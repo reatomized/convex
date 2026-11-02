@@ -59,9 +59,9 @@ weakly, so an unused entry can be collected.
 ## Build
 
 The root package is `@reatomized/convex` and lists `packages/*` as npm
-workspaces. Its `files` ship only `dist`, so workspace packages stay out of its
-tarball. `npm run typecheck`, `npm test` and `npm run build` cover the
-workspaces too.
+workspaces, including `.` so Changesets discovers the core package. Its `files`
+ship only `dist`, so workspace packages stay out of its tarball.
+`npm run typecheck`, `npm test` and `npm run build` cover the workspaces too.
 
 `tsconfig.build.json` names the sources of the `exports` in `package.json` as
 its entries. TypeScript follows the modules it imports and writes JavaScript and
@@ -181,4 +181,5 @@ a release PR for pending `.changeset/*.md` files; merging that PR publishes the
 package through npm trusted publishing and tags the release commit.
 
 Pull requests and pushes to `reatom` also publish installable previews through
-`pkg.pr.new`. The preview URL is printed by the `Preview release` workflow.
+`pkg.pr.new` for both packages. The preview URLs are printed by the
+`Preview release` workflow.

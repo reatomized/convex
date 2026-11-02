@@ -1,6 +1,6 @@
 {
   "name": "@reatomized/convex-storybook",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "A Storybook addon that answers @reatomized/convex functions with story handlers",
   "keywords": [
     "storybook-addon",
@@ -45,7 +45,7 @@
   },
   "peerDependencies": {
     "@reatom/core": "^1001.3.0",
-    "@reatomized/convex": "^0.4.0",
+    "@reatomized/convex": "^0.3.1",
     "convex": "^1.49.0",
     "storybook": "^9.0.0 || ^10.0.0 || ^11.0.0-0"
   },
