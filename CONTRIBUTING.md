@@ -1,7 +1,8 @@
 # Contributing
 
-The `reatom` branch holds `@reatomized/convex` and the
-[convex-js](https://github.com/convex/convex-js) sources it imports. Files under
+The `reatom` branch holds `@reatomized/convex`, the
+[convex-js](https://github.com/convex/convex-js) sources it imports, and
+`@reatomized/convex-storybook` in `packages/convex-storybook`. Files under
 `src/` outside `src/browser/reatom` come from `upstream/main`. Their
 implementation stays upstream's; imports of its server and values modules use
 the public `convex/server` and `convex/values` peer entry points.
@@ -33,11 +34,15 @@ mise exec dprint@0.51.1 -- dprint check
 | `src/browser/reatom/auth.ts`                   | Token fetch, server confirmation, scheduled refetch, reauthentication                     |
 | `src/browser/reatom/client.ts`                 | Query entries, query set and identity versions, requests, optimistic updates, transitions |
 | `src/browser/reatom/paginated.ts`              | Page lists derived from page query results, splits                                        |
+| `src/browser/reatom/testing.ts`                | The `testing` entry: fakes for UI tests and stories                                       |
+| `src/browser/reatom/fake_client.ts`            | A client whose functions are handlers, `reatomConvexClientFake`                           |
+| `src/browser/reatom/fake_auth.ts`              | Identities in unsigned JWTs, an auth library fake and an auth state fake                  |
 | `src/browser/reatom/parity_*.ts`               | The parity tests' server and their `BaseConvexClient` and `PaginatedQueryClient` adapters |
 | `src/browser/sync`, `src/common`, `src/vendor` | Upstream's protocol types and helpers the client reuses, and upstream's client            |
 | `scripts/build.mjs`                            | The package build                                                                         |
 | `scripts/source-audit.mjs`                     | Lists package, test-only and unused sources                                               |
 | `scripts/peer-imports.mjs`                     | Reapplies public Convex imports after an upstream checkout                                |
+| `packages/convex-storybook`                    | The Storybook addon: `convexStory` and typed `parameters.convex`                          |
 
 `convex` is both a peer dependency and a pinned dev dependency. Source, tests
 and emitted declarations import its public `convex/server` and `convex/values`
@@ -53,11 +58,21 @@ weakly, so an unused entry can be collected.
 
 ## Build
 
+The root package is `@reatomized/convex` and lists `packages/*` as npm
+workspaces, including `.` so Changesets discovers the core package. Its `files`
+ship only `dist`, so workspace packages stay out of its tarball.
+`npm run typecheck`, `npm test` and `npm run build` cover the workspaces too.
+
 `tsconfig.build.json` names the sources of the `exports` in `package.json` as
 its entries. TypeScript follows the modules it imports and writes JavaScript and
 declarations to `dist/`; tests and the upstream reference client are not build
 entries. `scripts/build.mjs` clears `dist/`, runs that compilation, and copies
 vendored licenses next to their emitted modules. There is no staging directory.
+
+`packages/convex-storybook` builds with its own `tsconfig.build.json`. It
+imports `@reatomized/convex` through the workspace link to the root, whose
+declarations the core build writes first. Its typecheck and tests read the core
+sources instead, so they need no build. It imports `storybook` for types only.
 
 Typecheck and build resolve public Convex imports against the pinned dev
 version. They fail if this client or an upstream helper imports a symbol the
@@ -74,8 +89,12 @@ set and identity versions on every message; query sets are compared at
 checkpoints, since the Reatom client batches them. The `deviations` tests pin
 the differences the README lists.
 
-`src/browser/reatom/client.test.ts` covers the Reatom API. Its function
-references and `ConvexError` assertions come from the public `convex` package.
+`src/browser/reatom/client.test.ts` covers the Reatom API.
+`src/browser/reatom/testing.test.ts` covers the fakes and runs one consumer
+model on both the real client, over the scripted server, and the fake.
+`packages/convex-storybook/test` checks the addon's inferred `parameters`, like
+`definePreview` sees them, and `convexStory`. Its function references and
+`ConvexError` assertions come from the public `convex` package.
 `auth_state.test.ts`, `convex_auth.test.ts` and `better_auth.test.ts` run the
 auth state and both auth library providers against the scripted server; Convex
 Auth's HTTP exchanges and the Better Auth client are fakes.
@@ -150,7 +169,8 @@ dependency in `package.json` to it.
 
 ## Releases
 
-`@reatomized/convex` has its own semver in `package.json`.
+`@reatomized/convex` and `@reatomized/convex-storybook` each have their own
+semver in their `package.json`.
 
 For a change that needs a release, run `npm run changeset`, select the version
 bump, and describe the change. Commit the generated `.changeset/*.md` file with
@@ -161,4 +181,5 @@ a release PR for pending `.changeset/*.md` files; merging that PR publishes the
 package through npm trusted publishing and tags the release commit.
 
 Pull requests and pushes to `reatom` also publish installable previews through
-`pkg.pr.new`. The preview URL is printed by the `Preview release` workflow.
+`pkg.pr.new` for both packages. The preview URLs are printed by the
+`Preview release` workflow.

@@ -115,6 +115,63 @@ For another library, pass any object with `isLoading` and `session` atoms and a
 user or organization id. Pass an atom of providers to switch libraries at
 runtime.
 
+## Testing
+
+`@reatomized/convex/testing` has fakes for UI tests and stories, with no
+deployment and no socket. `reatomConvexClientFake()` is a `ReatomConvexClient`
+whose functions are handlers, registered per function reference with types from
+it:
+
+```ts
+import { loading, reatomConvexClientFake } from "@reatomized/convex/testing";
+import { atom } from "@reatom/core";
+import { ConvexError } from "convex/values";
+import { api } from "../convex/_generated/api";
+
+const convex = reatomConvexClientFake();
+const notes = atom<string[]>([], "notes");
+const ready = atom(true, "ready");
+
+convex.handleQuery(api.notes.list, () => (ready() ? notes() : loading));
+convex.handleMutation(api.notes.add, ({ text }, { identity }) => {
+  if (!identity) throw new ConvexError("Not authenticated");
+  notes.set((all) => [...all, text]);
+  return null;
+});
+```
+
+- Query handlers run inside computeds. A handler that reads atoms runs again
+  when they change, and a mutation handler that writes them updates every query
+  that reads them.
+- Returning `loading` keeps a query loading. A handler that throws fails the
+  query with that error in `error`, so a `ConvexError` keeps its `data`. Query
+  handlers are synchronous; mutation and action handlers may return promises.
+- Results go through `convexToJson`, as on the wire: `undefined` arrives as
+  `null`, and a value Convex can't send fails the call.
+- A function without a handler throws `MissingHandlerError` naming it: on read
+  for a query, at the call for a mutation or action. App code may catch that
+  throw, so the fake also logs it with `console.error` and lists it in
+  `unhandled`.
+- The second argument of a handler is `{ identity }`, like
+  `ctx.auth.getUserIdentity()`. `setAuth` takes it from the token's claims;
+  `identity` is also settable.
+- `paginatedQuery` pages through a query handler's results;
+  `paginate(items, paginationOpts)` cuts a page from an array.
+- `connected` and `isRefreshingAuth` set what the client reports.
+- Handlers and state are per Reatom context, like the real client's. Register
+  handlers inside the frame that uses them.
+
+For auth, `reatomAuthProviderFake({ identity })` is an auth library for the real
+`reatomAuthState(convex, provider)`: its token carries `identity`, so the
+handlers see who signed in, and setting `provider.identity` signs in or out. Use
+it to run the app's own auth state. `reatomAuthStateFake(status)` returns the
+shape `reatomAuthState` returns with a settable `status`, for code that takes an
+auth state and should show `loading` or `rejected` without a client.
+
+For Storybook,
+[`@reatomized/convex-storybook`](https://github.com/reatomized/convex/tree/reatom/packages/convex-storybook#readme)
+builds these fakes per story from typed `parameters.convex`.
+
 ## Node
 
 With `@reatom/core@1001.3.0` loaded, Node never exits on its own, so a script

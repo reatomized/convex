@@ -18,6 +18,7 @@
   "files": [
     "src/browser/reatom/index.ts",
     "src/browser/reatom/convex_auth.ts",
-    "src/browser/reatom/better_auth.ts"
+    "src/browser/reatom/better_auth.ts",
+    "src/browser/reatom/testing.ts"
   ]
 }
