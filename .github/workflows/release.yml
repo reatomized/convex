@@ -1,7 +1,8 @@
 name: Release
 
-# Publishes @reatomized/convex when package.json on `reatom` holds a version
-# npm doesn't have yet, then tags the commit `v<version>`.
+# Publishes @reatomized/convex and @reatomized/convex-storybook when their
+# package.json on `reatom` holds a version npm doesn't have yet, then tags the
+# commit `v<version>` and `convex-storybook-v<version>`.
 on:
   push:
     branches: [reatom]
@@ -28,17 +29,24 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      - name: Check whether the version is published
+      - name: Find unpublished versions
         id: version
         run: |
-          version=$(node -p 'require("./package.json").version')
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if npm view "@reatomized/convex@$version" version 2>/dev/null | grep -q .; then
-            echo "@reatomized/convex@$version is on npm already."
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          fi
+          publish=false
+          for dir in . packages/convex-storybook; do
+            name=$(node -p "require('./$dir/package.json').name")
+            version=$(node -p "require('./$dir/package.json').version")
+            key=$([ "$dir" = . ] && echo core || echo storybook)
+            echo "${key}_version=$version" >> "$GITHUB_OUTPUT"
+            if npm view "$name@$version" version 2>/dev/null | grep -q .; then
+              echo "$name@$version is on npm already."
+              echo "$key=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "$key=true" >> "$GITHUB_OUTPUT"
+              publish=true
+            fi
+          done
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
 
       # Trusted publishing (configured on npmjs.com for this repo and
       # release.yml) needs npm 11.5.1 or later. No NPM_TOKEN secret.
@@ -58,21 +66,28 @@ jobs:
           npm run typecheck
           npm test -- --silent=true
 
-      # prepack builds the package.
+      # prepack builds each package. The addon's build reads the core's
+      # declarations, so the core packs first.
       - name: Pack
         if: steps.version.outputs.publish == 'true'
-        run: npm pack
-
-      - name: Publish
-        if: steps.version.outputs.publish == 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: npm publish "reatomized-convex-$VERSION.tgz" --access public
-
-      - name: Tag
-        if: steps.version.outputs.publish == 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
+          npm pack
+          npm pack --workspace packages/convex-storybook
+
+      - name: Publish @reatomized/convex
+        if: steps.version.outputs.core == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.core_version }}
+        run: |
+          npm publish "reatomized-convex-$VERSION.tgz" --access public
           git tag "v$VERSION"
           git push origin "v$VERSION"
+
+      - name: Publish @reatomized/convex-storybook
+        if: steps.version.outputs.storybook == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.storybook_version }}
+        run: |
+          npm publish "reatomized-convex-storybook-$VERSION.tgz" --access public
+          git tag "convex-storybook-v$VERSION"
+          git push origin "convex-storybook-v$VERSION"

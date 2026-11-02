@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": ["src", "test", "vitest.config.ts"],
+  "compilerOptions": {
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "paths": {
+      "@reatomized/convex": ["../../src/browser/reatom/index.ts"],
+      "@reatomized/convex/testing": ["../../src/browser/reatom/testing.ts"]
+    }
+  }
+}
