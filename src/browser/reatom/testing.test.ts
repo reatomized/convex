@@ -237,7 +237,9 @@ describe("reatomConvexClientFake", () => {
     expect(() => frame.run(() => convex.mutation(add, { text: "a" }))).toThrow(
       MissingHandlerError,
     );
-    expect(convex.unhandled.map(({ message }) => message)).toEqual([
+    expect(
+      frame.run(() => convex.unhandled.map(({ message }) => message)),
+    ).toEqual([
       "No fake handler for query notes:list. Register one with handleQuery(api.notes.list, ...).",
       "No fake handler for action mail/outbox:send. Register one with handleAction(api.mail.outbox.send, ...).",
       "No fake handler for mutation notes:add. Register one with handleMutation(api.notes.add, ...).",
@@ -246,6 +248,25 @@ describe("reatomConvexClientFake", () => {
 
     frame.run(() => convex.handleQuery(list, () => ["late"]));
     expect(read()).toEqual(["late"]);
+  });
+
+  test("the same missing function is logged and recorded in each frame", () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(noop);
+    const convex = reatomConvexClientFake();
+    const frames = [context.start(), context.start()];
+    for (const frame of frames) {
+      frame.run(() => {
+        expect(convex.unhandled).toEqual([]);
+        expect(() => convex.query(list, {}).data()).toThrow(
+          MissingHandlerError,
+        );
+        expect(() => convex.query(list, {}).data()).toThrow(
+          MissingHandlerError,
+        );
+        expect(convex.unhandled).toHaveLength(1);
+      });
+    }
+    expect(errors).toHaveBeenCalledTimes(2);
   });
 
   test("replacing a handler re-runs the queries using it", () => {
@@ -259,6 +280,7 @@ describe("reatomConvexClientFake", () => {
   });
 
   test("each frame has its own handlers and state", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(noop);
     const convex = reatomConvexClientFake();
     const notes = atom<string[]>([], "notes");
     const first = context.start();
@@ -282,6 +304,10 @@ describe("reatomConvexClientFake", () => {
     expect(() => third.run(() => convex.query(list, {}).data())).toThrow(
       MissingHandlerError,
     );
+    first.run(() => expect(convex.unhandled).toEqual([]));
+    second.run(() => expect(convex.unhandled).toEqual([]));
+    third.run(() => expect(convex.unhandled).toHaveLength(1));
+    expect(errors).toHaveBeenCalledTimes(1);
   });
 
   test("handlers see the identity of the accepted token", async () => {
@@ -369,6 +395,17 @@ describe("reatomConvexClientFake", () => {
     frame.run(() => {
       expect(convex.isAuthenticated()).toBe(false);
       expect(convex.identity()).toBeNull();
+    });
+  });
+
+  test("accepts an empty token as an authenticated identity", async () => {
+    const frame = context.start();
+    const convex = reatomConvexClientFake();
+    frame.run(() => convex.setAuth(() => Promise.resolve("")));
+    await settle();
+    frame.run(() => {
+      expect(convex.isAuthenticated()).toBe(true);
+      expect(convex.identity()).toEqual(fakeIdentity(""));
     });
   });
 

@@ -52,7 +52,7 @@ export interface ConvexStorybookParameters {
 }
 
 const byFrame = new WeakMap<RootFrame, ConvexStoryFake>();
-const bySignal = new WeakMap<AbortSignal, Set<ConvexStoryFake>>();
+const bySignal = new WeakMap<AbortSignal, Map<RootFrame, ConvexStoryFake>>();
 
 const createFake = ({
   auth = "authenticated",
@@ -89,13 +89,13 @@ export function convexStory(story: ConvexStoryContext): ConvexStoryFake {
     byFrame.set(frame, fake);
     parameters.setup?.(fake, story);
   }
-  const fakes = bySignal.get(story.abortSignal) ?? new Set();
-  bySignal.set(story.abortSignal, fakes.add(fake));
+  const fakes = bySignal.get(story.abortSignal) ?? new Map();
+  bySignal.set(story.abortSignal, fakes.set(frame, fake));
   return fake;
 }
 
 /** Functions the story's fakes were called without handlers for. */
 export const unhandledIn = (signal: AbortSignal): MissingHandlerError[] =>
-  Array.from(bySignal.get(signal) ?? [], ({ convex }) => [
-    ...convex.unhandled,
-  ]).flat();
+  Array.from(bySignal.get(signal) ?? [], ([frame, { convex }]) =>
+    frame.run(() => [...convex.unhandled]),
+  ).flat();
