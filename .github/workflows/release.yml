@@ -1,7 +1,5 @@
 name: Release
 
-# Publishes @reatomized/convex when package.json on `reatom` holds a version
-# npm doesn't have yet, then tags the commit `v<version>`.
 on:
   push:
     branches: [reatom]
@@ -18,7 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: write # push the release tag
+      contents: write # create the Version Packages PR and git tags
+      pull-requests: write # open/update the release PR
       id-token: write # OIDC trusted publishing + provenance
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -28,51 +27,23 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      - name: Check whether the version is published
-        id: version
-        run: |
-          version=$(node -p 'require("./package.json").version')
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if npm view "@reatomized/convex@$version" version 2>/dev/null | grep -q .; then
-            echo "@reatomized/convex@$version is on npm already."
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          fi
-
       # Trusted publishing (configured on npmjs.com for this repo and
       # release.yml) needs npm 11.5.1 or later. No NPM_TOKEN secret.
-      - name: Update npm
-        if: steps.version.outputs.publish == 'true'
+      - name: Update npm (OIDC trusted publishing)
         run: npm install -g npm@latest
 
       # @reatom/core comes from a pkg.pr.new URL, which npm 12 installs only
       # when allowed.
       - name: Install
-        if: steps.version.outputs.publish == 'true'
         run: npm ci --allow-remote=root
 
-      - name: Test
-        if: steps.version.outputs.publish == 'true'
-        run: |
-          npm run typecheck
-          npm test -- --silent=true
+      - name: Build
+        run: npm run build
 
-      # prepack builds the package.
-      - name: Pack
-        if: steps.version.outputs.publish == 'true'
-        run: npm pack
-
-      - name: Publish
-        if: steps.version.outputs.publish == 'true'
+      - name: Create release PR or publish to npm
+        uses: changesets/action@v2
+        with:
+          version-script: npm run version-packages
+          publish-script: npm run release
         env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: npm publish "reatomized-convex-$VERSION.tgz" --access public
-
-      - name: Tag
-        if: steps.version.outputs.publish == 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          git tag "v$VERSION"
-          git push origin "v$VERSION"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
