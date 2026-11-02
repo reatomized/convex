@@ -152,6 +152,13 @@ dependency in `package.json` to it.
 
 `@reatomized/convex` has its own semver in `package.json`.
 
-`.github/workflows/release.yml` runs on every push to `reatom`. When npm doesn't
-have the version in `package.json`, it tests, builds and publishes the package
-through npm trusted publishing, then tags the commit `v<version>`.
+For a change that needs a release, run `npm run changeset`, select the version
+bump, and describe the change. Commit the generated `.changeset/*.md` file with
+the change.
+
+`.github/workflows/release.yml` runs on every push to `reatom`. Changesets opens
+a release PR for pending `.changeset/*.md` files; merging that PR publishes the
+package through npm trusted publishing and tags the release commit.
+
+Pull requests and pushes to `reatom` also publish installable previews through
+`pkg.pr.new`. The preview URL is printed by the `Preview release` workflow.
