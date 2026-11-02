@@ -1,6 +1,6 @@
 {
   "name": "@reatomized/convex",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "A Convex sync client with its state in Reatom atoms",
   "keywords": [
     "convex",
@@ -32,6 +32,10 @@
     "./better-auth": {
       "types": "./dist/browser/reatom/better_auth.d.ts",
       "default": "./dist/browser/reatom/better_auth.js"
+    },
+    "./testing": {
+      "types": "./dist/browser/reatom/testing.d.ts",
+      "default": "./dist/browser/reatom/testing.js"
     },
     "./package.json": "./package.json"
   },
