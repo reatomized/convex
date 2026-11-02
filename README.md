@@ -55,6 +55,67 @@ gets its own connection. The socket opens on first use in a context.
 There are no React hooks. Read the atoms through your Reatom view binding, such
 as `@reatom/react` or `@reatom/jsx`.
 
+## Extensions
+
+The same calls as Reatom extensions, for models built from atoms and actions. An
+atom whose state is a query's arguments gets the query's state; an action that
+returns a function's arguments calls the function:
+
+```ts
+import {
+  withConvexMutation,
+  withConvexPaginatedQuery,
+  withConvexQuery,
+} from "@reatomized/convex";
+import { action, atom, computed, wrap } from "@reatom/core";
+
+const note = computed(() => {
+  const id = noteId();
+  return id ? { id } : "skip";
+}, "note").extend(withConvexQuery(convex, api.notes.get));
+note.data(); // also error, status, ready and query
+
+const notes = atom({}, "notes").extend(
+  withConvexPaginatedQuery(convex, api.notes.list, { initialNumItems: 10 }),
+);
+notes.results(); // also status, error, loadMore and query
+
+const addNote = action((text: string) => ({ text }), "addNote").extend(
+  withConvexMutation(convex, api.notes.add, {
+    optimisticUpdate: (store, { text }) => {
+      /* ... */
+    },
+  }),
+);
+await wrap(addNote("Hello")); // the mutation's result
+addNote.ready(); // and the rest of withAsync
+```
+
+- `withConvexQuery(client, ref, options)` adds `data`, `error`, `status`,
+  `ready` and `query`, the `convex.query` entry for the current arguments. Equal
+  arguments share one entry. When the arguments change, the new query replaces
+  the old one in one `ModifyQuerySet`. `"skip"` subscribes nothing: `status` is
+  `skipped`, `ready` is true and `query` is `undefined`.
+- `withConvexPaginatedQuery(client, ref, { initialNumItems, id })` takes the
+  arguments without `paginationOpts` and adds `results`, `status`, `error`,
+  `loadMore` and `query`. While skipped, `results` is empty and `status` is
+  `Skipped`.
+- `withConvexMutation(client, ref, { optimisticUpdate, ...asyncOptions })` and
+  `withConvexAction(client, ref, asyncOptions)` make the action return the
+  function's promise and apply `withAsync` to it. The callback may return a
+  promise of the arguments, or nothing when every argument is optional. The
+  optimistic update receives the mutation's arguments.
+- `client` is a client, or a function that returns one, such as an atom that
+  holds it. The query extensions call it in their computeds, so they follow a
+  client that changes, and the call extensions call it on every call.
+- The atom's state and the action's return value are checked against the
+  function's arguments. Like Reatom's own extensions, a query atom whose state
+  doesn't fit gets a `withConvexQuery_ERROR` property instead of the query
+  atoms.
+
+The extensions only call the client, so they work with
+`reatomConvexClientFake()` too.
+
 ## Auth
 
 `reatomAuthState(convex, provider)` does what convex/react's
