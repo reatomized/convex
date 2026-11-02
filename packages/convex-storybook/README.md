@@ -79,8 +79,7 @@ parameters: {
   as `ctx.identity`.
 - The fakes are `convex`, a `reatomConvexClientFake`; `provider`, a
   `reatomAuthProviderFake` signed in as `identity`; and `auth`, the real
-  `reatomAuthState(convex, provider)`. Setting `provider.identity` in a test
-  signs in or out.
+  `reatomAuthState(convex, provider)`.
 
 Storybook merges `parameters.convex` per key, so a story can set `auth` or
 `identity` and keep the `setup` its meta or preview declares.
@@ -89,40 +88,30 @@ Storybook merges `parameters.convex` per key, so a story can set `auth` or
 
 Stories should drive the UI through an actor. Keep atom and model assertions in
 unit tests. This example starts as the admin, clicks the visible approval
-button, and checks the updated account list:
+button, and checks the updated account list. Its meta registers the actor loader
+and seeds the admin and pending member through `parameters.convex.setup`, as in
+[the demo's Access stories](https://github.com/reatomized/convex-demo/blob/use-reatomized-convex/src/app/integration/Access.stories.tsx):
 
 ```tsx
-import { button, createActor, heading, text } from "#shared/test";
-import { fakeIdentity } from "@reatomized/convex/testing";
-
-const meta = preview.meta({
-  component: App,
-  parameters: {
-    initialPath: "team",
-    convex: {
-      identity: fakeIdentity("olga", { email: "olga@example.com" }),
-      // setupAccessFixture registers handlers backed by the story's fixture.
-      setup: setupAccessFixture,
-    },
-  },
-  loaders: [(ctx) => I.init(ctx)],
-});
-export default meta;
-
-export const AdminManagesAccounts = meta.story();
-
 AdminManagesAccounts.test("approves a waiting account", async () => {
   await I.see(heading("Team space").wait());
   await I.click(button("Approve: alex@example.com"));
-  await I.see(text("alex@example.com").within(heading("Approved")).wait());
+  await I.see(
+    text("alex@example.com").within(role("region", "Approved")).wait(),
+  );
+  await I.dontSee(text("alex@example.com").within(role("region", "Pending")));
 });
 ```
 
-`I` is a [kahraman](https://github.com/apphane-dev/kahraman) actor. The click
-goes through the app's action and the fake mutation, so the test covers the same
-path a user takes. An app may keep a private frame helper for exceptional
-infrastructure tests that must switch identities in one frame. That helper is
-not the normal story API; direct atom and model assertions belong in unit tests.
+`I` is a [kahraman](https://github.com/apphane-dev/kahraman) actor. Actor-only
+tests need no frame wrapper. The click goes through the app's action and the
+fake mutation, so the test covers the same path a user takes. Authentication
+journeys should use the app's sign-in and sign-out UI.
+
+Keep `inStoryFrame` internal to app-specific test infrastructure. A test needs
+it only when that infrastructure must read or write atoms, such as simulating a
+connection change with no UI control. Model and atom assertions belong in unit
+tests.
 
 ## Missing handlers
 
