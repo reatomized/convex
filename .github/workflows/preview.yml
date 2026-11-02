@@ -27,4 +27,6 @@ jobs:
         run: npm run build
 
       - name: Publish preview
-        run: npx pkg-pr-new publish . packages/convex-storybook
+        run: |
+          npx pkg-pr-new publish .
+          npx pkg-pr-new publish packages/convex-storybook
