@@ -54,6 +54,29 @@ const clientOf = (source: ConvexClientSource): ReatomConvexClient =>
   typeof source === "function" ? source() : source;
 
 /**
+ * Defines each of `atoms` on `target` as a getter that creates the atom on its
+ * first read, as the client's query entries do. An app with many query atoms
+ * then builds only the ones it reads, and returning the target keeps
+ * `extend` from reading them all.
+ */
+const defineLazy = <Target extends AtomLike>(
+  target: Target,
+  atoms: Record<string, () => unknown>,
+): Target => {
+  for (const [key, create] of Object.entries(atoms)) {
+    if (key in target) {
+      throw new Error(`${target.name} already has ${key}`);
+    }
+    let created: unknown;
+    Object.defineProperty(target, key, {
+      enumerable: true,
+      get: () => (created ??= create()),
+    });
+  }
+  return target;
+};
+
+/**
  * The status of an atom extended with {@link withConvexQuery}: the query's
  * status, or `skipped` while the atom holds `"skip"`.
  *
@@ -109,24 +132,42 @@ export function withConvexQuery<Query extends QueryRef>(
   : {
       withConvexQuery_ERROR: "The atom's state should be the query's arguments or \"skip\"";
     } {
-  return ((target: AtomLike): ConvexQueryExt<ReturnOf<Query>> => {
-    const entry = computed((): ReatomQuery<ReturnOf<Query>> | undefined => {
-      const args = target();
-      return args === "skip"
-        ? undefined
-        : clientOf(client).query(query, args, options);
-    }, `${target.name}.query`);
-    const status = computed(
-      (): ConvexQueryStatus => entry()?.status() ?? "skipped",
-      `${target.name}.status`,
-    );
-    return {
-      query: entry,
-      data: computed(() => entry()?.data(), `${target.name}.data`),
-      error: computed(() => entry()?.error(), `${target.name}.error`),
-      status,
-      ready: computed(() => status() !== "loading", `${target.name}.ready`),
-    };
+  type T = ReturnOf<Query>;
+  return ((target: AtomLike) => {
+    let entry: Computed<ReatomQuery<T> | undefined> | undefined;
+    // Equal arguments read the same entry, so it changes only with them.
+    const entryOf = () =>
+      (entry ??= computed((): ReatomQuery<T> | undefined => {
+        const args = target();
+        return args === "skip"
+          ? undefined
+          : clientOf(client).query(query, args, options);
+      }, `${target.name}.query`));
+    // `data` and `status` read the entry's result, not its computeds, so an
+    // update recomputes as many atoms as reading the entry directly.
+    const ext: ConvexQueryExt<T> = defineLazy(target, {
+      query: entryOf,
+      data: () =>
+        computed((): T | undefined => {
+          const result = entryOf()()?.result();
+          return result?.success ? (result.value as T) : undefined;
+        }, `${target.name}.data`),
+      error: () => computed(() => entryOf()()?.error(), `${target.name}.error`),
+      status: () =>
+        computed((): ConvexQueryStatus => {
+          const current = entryOf()();
+          if (current === undefined) return "skipped";
+          const result = current.result();
+          return result === undefined
+            ? "loading"
+            : result.success
+              ? "success"
+              : "error";
+        }, `${target.name}.status`),
+      ready: () =>
+        computed(() => ext.status() !== "loading", `${target.name}.ready`),
+    }) as any;
+    return ext;
   }) as any;
 }
 
@@ -210,29 +251,36 @@ export function withConvexPaginatedQuery<Query extends QueryRef>(
       withConvexPaginatedQuery_ERROR: "The atom's state should be the query's arguments without paginationOpts, or \"skip\"";
     } {
   type Item = PaginatedItemOf<Query>;
-  return ((target: AtomLike): ConvexPaginatedQueryExt<Item> => {
-    const entry = computed((): ReatomPaginatedQuery<Item> | undefined => {
-      const args = target();
-      return args === "skip"
-        ? undefined
-        : clientOf(client).paginatedQuery(query, args, options);
-    }, `${target.name}.query`);
-    return {
-      query: entry,
-      results: computed(
-        (): Item[] => entry()?.results() ?? NO_RESULTS,
-        `${target.name}.results`,
-      ),
-      status: computed(
-        (): ConvexPaginatedQueryStatus => entry()?.status() ?? "Skipped",
-        `${target.name}.status`,
-      ),
-      error: computed(() => entry()?.error(), `${target.name}.error`),
-      loadMore: action(
-        (numItems: number) => entry()?.loadMore(numItems) ?? false,
-        `${target.name}.loadMore`,
-      ),
-    };
+  return ((target: AtomLike) => {
+    let entry: Computed<ReatomPaginatedQuery<Item> | undefined> | undefined;
+    const paginated = () =>
+      (entry ??= computed((): ReatomPaginatedQuery<Item> | undefined => {
+        const args = target();
+        return args === "skip"
+          ? undefined
+          : clientOf(client).paginatedQuery(query, args, options);
+      }, `${target.name}.query`));
+    return defineLazy(target, {
+      query: paginated,
+      results: () =>
+        computed(
+          (): Item[] => paginated()()?.results() ?? NO_RESULTS,
+          `${target.name}.results`,
+        ),
+      status: () =>
+        computed(
+          (): ConvexPaginatedQueryStatus =>
+            paginated()()?.status() ?? "Skipped",
+          `${target.name}.status`,
+        ),
+      error: () =>
+        computed(() => paginated()()?.error(), `${target.name}.error`),
+      loadMore: () =>
+        action(
+          (numItems: number) => paginated()()?.loadMore(numItems) ?? false,
+          `${target.name}.loadMore`,
+        ),
+    });
   }) as any;
 }
 
