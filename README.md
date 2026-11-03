@@ -153,8 +153,7 @@ of both. `updateQuery` changes the query an extended atom holds:
 The extensions create their atoms on first read, and `data` and `status` read
 the query's result directly, so an update recomputes as many atoms as reading
 `convex.query(ref, args).data` does. They only call the client, so they work
-with `reatomConvexClientFake()` too; the fake applies mutations through their
-handlers and ignores optimistic updates.
+with `reatomConvexClientFake()` too.
 
 ## Auth
 
@@ -247,6 +246,9 @@ convex.handleMutation(api.notes.add, ({ text }, { identity }) => {
 - Returning `loading` keeps a query loading. A handler that throws fails the
   query with that error in `error`, so a `ConvexError` keeps its `data`. Query
   handlers are synchronous; mutation and action handlers may return promises.
+- A mutation's optimistic update shows while its handler's promise is pending
+  and replays over what the query handlers return, as the real client replays it
+  over server results. A synchronous handler's result replaces it at once.
 - Results go through `convexToJson`, as on the wire: `undefined` arrives as
   `null`, and a value Convex can't send fails the call.
 - A function without a handler throws `MissingHandlerError` naming it: on read

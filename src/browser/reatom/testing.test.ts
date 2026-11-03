@@ -5,6 +5,7 @@ import {
   type PaginationOptions,
   type PaginationResult,
 } from "convex/server";
+import type { OptimisticLocalStore } from "convex/browser";
 import { ConvexError } from "convex/values";
 import { reatomAuthState } from "./auth_state.js";
 import { reatomConvexClient, type ReatomConvexClient } from "./client.js";
@@ -111,6 +112,69 @@ describe("reatomConvexClientFake", () => {
       expect(convex.connectionState().inflightMutations).toBe(0);
       expect(convex.connectionState().hasInflightRequests).toBe(false);
     });
+  });
+
+  test("an optimistic update shows while the mutation's handler is pending", async () => {
+    const frame = context.start();
+    const { convex, notes } = withNotes(frame);
+    let release!: (fail?: Error) => void;
+    frame.run(() =>
+      convex.handleMutation(add, async ({ text }) => {
+        await wrap(
+          new Promise<void>((resolve, reject) => {
+            release = (fail) => (fail ? reject(fail) : resolve());
+          }),
+        );
+        notes.set((all) => [...all, text]);
+        return null;
+      }),
+    );
+    const all = frame.run(() => convex.query(list, {}));
+    frame.run(() => all.data.subscribe(noop));
+    const optimisticUpdate = (
+      store: OptimisticLocalStore,
+      { text }: { text: string },
+    ) => {
+      const current = store.getQuery(list, {});
+      if (current) store.setQuery(list, {}, [...current, `${text}?`]);
+    };
+
+    const done = frame.run(() =>
+      convex.mutation(add, { text: "a" }, { optimisticUpdate }),
+    );
+    frame.run(() => expect(all.data()).toEqual(["a?"]));
+    // It replays over what the handlers return now.
+    frame.run(() => notes.set(["b"]));
+    frame.run(() => expect(all.data()).toEqual(["b", "a?"]));
+    release();
+    await done;
+    frame.run(() => expect(all.data()).toEqual(["b", "a"]));
+
+    const failed = frame.run(() =>
+      convex.mutation(add, { text: "c" }, { optimisticUpdate }),
+    );
+    frame.run(() => expect(all.data()).toEqual(["b", "a", "c?"]));
+    release(new Error("refused"));
+    await expect(failed).rejects.toThrow("refused");
+    frame.run(() => expect(all.data()).toEqual(["b", "a"]));
+  });
+
+  test("a synchronous handler's result replaces its optimistic update at once", async () => {
+    const frame = context.start();
+    const { convex } = withNotes(frame);
+    const all = frame.run(() => convex.query(list, {}));
+    frame.run(() => all.data.subscribe(noop));
+    const done = frame.run(() =>
+      convex.mutation(
+        add,
+        { text: "a" },
+        {
+          optimisticUpdate: (store) => store.setQuery(list, {}, ["optimistic"]),
+        },
+      ),
+    );
+    frame.run(() => expect(all.data()).toEqual(["a"]));
+    await done;
   });
 
   test("a query stays loading while its handler returns `loading`", () => {
