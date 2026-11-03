@@ -12,6 +12,7 @@ export type {
   Transition,
 } from "./client.js";
 export {
+  updateQuery,
   withConvexAction,
   withConvexMutation,
   withConvexPaginatedQuery,
@@ -23,10 +24,14 @@ export type {
   ConvexCallArgs,
   ConvexClientSource,
   ConvexMutationOptions,
+  ConvexOptimisticUpdate,
+  ConvexOptimisticUpdates,
+  ConvexPagePosition,
   ConvexPaginatedQueryExt,
   ConvexPaginatedQueryOptions,
   ConvexPaginatedQueryStatus,
   ConvexQueryExt,
+  ConvexQueryOptions,
   ConvexQueryStatus,
 } from "./extensions.js";
 export type { AuthTokenFetcher } from "./auth.js";

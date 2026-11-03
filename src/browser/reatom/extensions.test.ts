@@ -27,10 +27,12 @@ import {
 import { ConvexError } from "convex/values";
 import { reatomConvexClient, type ReatomQuery } from "./client.js";
 import {
+  updateQuery,
   withConvexAction,
   withConvexMutation,
   withConvexPaginatedQuery,
   withConvexQuery,
+  type ConvexPagePosition,
   type ConvexQueryStatus,
 } from "./extensions.js";
 import { clientOptions, FakeServer, settle } from "./parity_test_helpers.js";
@@ -431,5 +433,285 @@ describe("withConvexAction", () => {
     await expect(sent).resolves.toBe("queued");
     frame.run(() => expect(sendMail.ready()).toBe(true));
     await frame.run(() => convex.close());
+  });
+});
+
+describe("withConvexQuery on an action", () => {
+  test("reads the query once and unsubscribes", async () => {
+    const frame = context.start();
+    const convex = reatomConvexClient(URL, clientOptions(server));
+    const loadNote = action((id: number) => ({ id }), "loadNote").extend(
+      withConvexQuery(convex, get),
+    );
+    expectTypeOf(loadNote).returns.toEqualTypeOf<Promise<string>>();
+
+    const loaded = frame.run(() => loadNote(1));
+    frame.run(() => expect(loadNote.ready()).toBe(false));
+    await settle();
+    server.open();
+    expect(server.querySet()).toEqual([
+      JSON.stringify({ udfPath: "notes:get", args: { id: 1 } }),
+    ]);
+    server.transition([["notes:get", { id: 1 }, { value: "one" }]]);
+    await expect(loaded).resolves.toBe("one");
+    await settle();
+    expect(server.querySet()).toEqual([]);
+    frame.run(() => expect(loadNote.ready()).toBe(true));
+    await frame.run(() => convex.close());
+  });
+
+  test("resolves with a result another reader holds", async () => {
+    const frame = context.start();
+    const convex = reatomConvexClient(URL, clientOptions(server));
+    const note = atom({ id: 1 }, "note").extend(withConvexQuery(convex, get));
+    const loadNote = action((id: number) => ({ id }), "loadNote").extend(
+      withConvexQuery(convex, get),
+    );
+    frame.run(() => note.data.subscribe(noop));
+    await settle();
+    server.open();
+    server.transition([["notes:get", { id: 1 }, { value: "one" }]]);
+
+    await expect(frame.run(() => loadNote(1))).resolves.toBe("one");
+    await settle();
+    // The atom's subscription stays.
+    expect(server.querySet()).toHaveLength(1);
+    await frame.run(() => convex.close());
+  });
+
+  test("rejects with the error the query failed with", async () => {
+    const frame = context.start();
+    const convex = reatomConvexClient(URL, clientOptions(server));
+    const loadNote = action((id: number) => ({ id }), "loadNote").extend(
+      withConvexQuery(convex, get),
+    );
+    const loaded = frame.run(() => loadNote(1));
+    await settle();
+    server.open();
+    server.transition([
+      ["notes:get", { id: 1 }, { error: "missing", errorData: { id: 1 } }],
+    ]);
+    await expect(loaded).rejects.toBeInstanceOf(ConvexError);
+    frame.run(() => {
+      expect((loadNote.error() as ConvexError<any>).data).toEqual({ id: 1 });
+    });
+    await settle();
+    expect(server.querySet()).toEqual([]);
+    await frame.run(() => convex.close());
+  });
+
+  test("checks what the action returns", () => {
+    const convex = reatomConvexClientFake();
+    expectTypeOf(
+      action(() => ({ id: "1" }), "wrongId").extend(
+        withConvexQuery(convex, get),
+      ),
+    ).toHaveProperty("withConvexQuery_ERROR");
+    expectTypeOf(
+      action(() => {}, "noArgs").extend(withConvexQuery(convex, list)),
+    ).returns.toEqualTypeOf<Promise<string[]>>();
+  });
+});
+
+describe("updateQuery", () => {
+  test("updates a query atom's value while the mutation is pending", async () => {
+    const frame = context.start();
+    const convex = reatomConvexClient(URL, clientOptions(server));
+    const notes = atom({ tag: "a" }, "notes").extend(
+      withConvexQuery(convex, list),
+    );
+    const other = atom({}, "other").extend(withConvexQuery(convex, list));
+    const calls: unknown[] = [];
+    const addNote = action((text: string) => ({ text }), "addNote").extend(
+      withConvexMutation(convex, add, {
+        optimisticUpdate: [
+          (_store, args) => calls.push(args),
+          updateQuery(notes, (current, { text }) => [...current, text]),
+        ],
+      }),
+    );
+    frame.run(() => {
+      notes.data.subscribe(noop);
+      other.data.subscribe(noop);
+    });
+    await settle();
+    server.open();
+    server.transition([
+      ["notes:list", { tag: "a" }, { value: ["a1"] }],
+      ["notes:list", {}, { value: ["a1", "b1"] }],
+    ]);
+
+    const result = frame.run(() => addNote("a2"));
+    frame.run(() => {
+      expect(notes.data()).toEqual(["a1", "a2"]);
+      // Only the atom's arguments change.
+      expect(other.data()).toEqual(["a1", "b1"]);
+    });
+    expect(calls).toEqual([{ text: "a2" }]);
+    await settle();
+    server.respond(0, { value: "id" });
+    server.transition([["notes:list", { tag: "a" }, { value: ["a1", "a2"] }]]);
+    await expect(result).resolves.toBe("id");
+    frame.run(() => expect(notes.data()).toEqual(["a1", "a2"]));
+    await frame.run(() => convex.close());
+  });
+
+  test("updates each loaded page of a paginated atom", async () => {
+    const frame = context.start();
+    const convex = reatomConvexClient(URL, clientOptions(server));
+    const pages = atom({ tag: "a" }, "pages").extend(
+      withConvexPaginatedQuery(convex, page, { initialNumItems: 2 }),
+    );
+    const addFirst = action(
+      (n: number) => ({ text: String(n) }),
+      "addFirst",
+    ).extend(
+      withConvexMutation(convex, add, {
+        optimisticUpdate: updateQuery(
+          pages,
+          (items, { text }, { first, last }) =>
+            first
+              ? [Number(text), ...items]
+              : last
+                ? [...items, -Number(text)]
+                : items,
+        ),
+      }),
+    );
+    frame.run(() => pages.results.subscribe(noop));
+    await settle();
+    server.open();
+    server.transition([
+      [
+        "notes:page",
+        { tag: "a", paginationOpts: { cursor: null, numItems: 2, id: -1 } },
+        { value: { page: [1, 2], isDone: false, continueCursor: "c" } },
+      ],
+    ]);
+    frame.run(() => pages.loadMore(2));
+    await settle();
+    server.transition([
+      [
+        "notes:page",
+        { tag: "a", paginationOpts: { cursor: "c", numItems: 2, id: -1 } },
+        { value: { page: [3], isDone: true, continueCursor: "e" } },
+      ],
+    ]);
+
+    void frame.run(() => addFirst(9));
+    frame.run(() => expect(pages.results()).toEqual([9, 1, 2, 3, -9]));
+    await frame.run(() => convex.close());
+  });
+
+  test("leaves a skipped atom alone", async () => {
+    const frame = context.start();
+    const convex = reatomConvexClientFake();
+    frame.run(() => convex.handleMutation(add, ({ text }) => text));
+    const notes = atom<{ tag: string } | "skip">("skip", "notes").extend(
+      withConvexQuery(convex, list),
+    );
+    const update = vi.fn((current: string[]) => current);
+    const addNote = action((text: string) => ({ text }), "addNote").extend(
+      withConvexMutation(convex, add, {
+        optimisticUpdate: updateQuery(notes, update),
+      }),
+    );
+    await expect(frame.run(() => addNote("a"))).resolves.toBe("a");
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  test("takes only atoms extended with a query extension", () => {
+    expect(() =>
+      updateQuery(atom({}, "plain") as never, (current: unknown) => current),
+    ).toThrow("updateQuery takes an atom extended with withConvexQuery");
+  });
+
+  test("types the value, the page and the mutation's arguments", () => {
+    const convex = reatomConvexClientFake();
+    const notes = atom({}, "notes").extend(withConvexQuery(convex, list));
+    const pages = atom({ tag: "a" }, "pages").extend(
+      withConvexPaginatedQuery(convex, page, { initialNumItems: 1 }),
+    );
+    withConvexMutation(convex, add, {
+      optimisticUpdate: [
+        updateQuery(notes, (current, args) => {
+          expectTypeOf(current).toEqualTypeOf<string[]>();
+          expectTypeOf(args).toEqualTypeOf<{ text: string }>();
+          return current;
+        }),
+        updateQuery(pages, (items, args, position) => {
+          expectTypeOf(items).toEqualTypeOf<number[]>();
+          expectTypeOf(args).toEqualTypeOf<{ text: string }>();
+          expectTypeOf(position).toEqualTypeOf<ConvexPagePosition>();
+          return items;
+        }),
+      ],
+    });
+    withConvexMutation(convex, add, {
+      // @ts-expect-error notes:list holds strings.
+      optimisticUpdate: updateQuery(notes, () => [1]),
+    });
+  });
+});
+
+describe("keepPreviousData", () => {
+  test("keeps a query's value while the new arguments load", () => {
+    const frame = context.start();
+    const convex = reatomConvexClientFake();
+    const ready = atom(new Set([1]), "ready");
+    frame.run(() =>
+      convex.handleQuery(get, ({ id }) =>
+        ready().has(id) ? `note ${id}` : loading,
+      ),
+    );
+    const id = atom<number | null>(1, "id");
+    const args = computed(() => {
+      const current = id();
+      return current === null ? "skip" : { id: current };
+    }, "args");
+    const stable = args.extend(
+      withConvexQuery(convex, get, { keepPreviousData: true }),
+    );
+    frame.run(() => {
+      stable.data.subscribe(noop);
+      expect(stable.data()).toBe("note 1");
+      id.set(2);
+      expect(stable.status()).toBe("loading");
+      expect(stable.data()).toBe("note 1");
+      ready.set(new Set([1, 2]));
+      expect(stable.data()).toBe("note 2");
+      // Skipping clears it.
+      id.set(null);
+      expect(stable.data()).toBeUndefined();
+    });
+  });
+
+  test("keeps a paginated query's items while the first new page loads", () => {
+    const frame = context.start();
+    const convex = reatomConvexClientFake();
+    const loaded = atom(new Set(["a"]), "loaded");
+    frame.run(() =>
+      convex.handleQuery(page, ({ tag, paginationOpts }) =>
+        loaded().has(tag)
+          ? paginate(tag === "a" ? [1, 2] : [3, 4], paginationOpts)
+          : loading,
+      ),
+    );
+    const tag = atom("a", "tag");
+    const pages = computed(() => ({ tag: tag() }), "pages").extend(
+      withConvexPaginatedQuery(convex, page, {
+        initialNumItems: 5,
+        keepPreviousData: true,
+      }),
+    );
+    frame.run(() => {
+      pages.results.subscribe(noop);
+      expect(pages.results()).toEqual([1, 2]);
+      tag.set("b");
+      expect(pages.status()).toBe("LoadingFirstPage");
+      expect(pages.results()).toEqual([1, 2]);
+      loaded.set(new Set(["a", "b"]));
+      expect(pages.results()).toEqual([3, 4]);
+    });
   });
 });

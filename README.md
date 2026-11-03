@@ -63,48 +63,69 @@ returns a function's arguments calls the function:
 
 ```ts
 import {
+  updateQuery,
   withConvexMutation,
   withConvexPaginatedQuery,
   withConvexQuery,
 } from "@reatomized/convex";
 import { action, atom, computed, wrap } from "@reatom/core";
 
+// Subscribed while read: data, error, status, ready and query.
 const note = computed(() => {
   const id = noteId();
   return id ? { id } : "skip";
 }, "note").extend(withConvexQuery(convex, api.notes.get));
-note.data(); // also error, status, ready and query
 
+// Pages: results, status, error, loadMore and query.
 const notes = atom({}, "notes").extend(
   withConvexPaginatedQuery(convex, api.notes.list, { initialNumItems: 10 }),
 );
-notes.results(); // also status, error, loadMore and query
 
+// A mutation with withAsync's ready, error and pending, and an optimistic
+// update that names the query atom it changes.
 const addNote = action((text: string) => ({ text }), "addNote").extend(
   withConvexMutation(convex, api.notes.add, {
-    optimisticUpdate: (store, { text }) => {
-      /* ... */
-    },
+    optimisticUpdate: updateQuery(notes, (page, { text }, { first }) =>
+      first ? [{ _id: "optimistic", text }, ...page] : page,
+    ),
   }),
 );
-await wrap(addNote("Hello")); // the mutation's result
-addNote.ready(); // and the rest of withAsync
+await wrap(addNote("Hello"));
+
+// The query read once, like ConvexClient.query.
+const loadNote = action((id: Id<"notes">) => ({ id }), "loadNote").extend(
+  withConvexQuery(convex, api.notes.get),
+);
+const loaded = await wrap(loadNote(id));
 ```
 
-- `withConvexQuery(client, ref, options)` adds `data`, `error`, `status`,
-  `ready` and `query`, the `convex.query` entry for the current arguments. Equal
-  arguments share one entry. When the arguments change, the new query replaces
-  the old one in one `ModifyQuerySet`. `"skip"` subscribes nothing: `status` is
-  `skipped`, `ready` is true and `query` is `undefined`.
+| Extension                  | On                                   | Adds                                                |
+| -------------------------- | ------------------------------------ | --------------------------------------------------- |
+| `withConvexQuery`          | an atom of the arguments or `"skip"` | `data`, `error`, `status`, `ready`, `query`         |
+| `withConvexPaginatedQuery` | an atom of the arguments or `"skip"` | `results`, `status`, `error`, `loadMore`, `query`   |
+| `withConvexQuery`          | an action that returns the arguments | returns the first result; `withAsync`               |
+| `withConvexMutation`       | an action that returns the arguments | returns the result; `withAsync`; optimistic updates |
+| `withConvexAction`         | an action that returns the arguments | returns the result; `withAsync`                     |
+
+- `withConvexQuery(client, ref, options)` on an atom adds the atoms of the
+  `convex.query` entry for the current arguments, `query`. Equal arguments share
+  one entry. When the arguments change, the new query replaces the old one in
+  one `ModifyQuerySet`. `"skip"` subscribes nothing: `status` is `skipped`,
+  `ready` is true and `query` is `undefined`.
 - `withConvexPaginatedQuery(client, ref, { initialNumItems, id })` takes the
-  arguments without `paginationOpts` and adds `results`, `status`, `error`,
-  `loadMore` and `query`. While skipped, `results` is empty and `status` is
-  `Skipped`.
-- `withConvexMutation(client, ref, { optimisticUpdate, ...asyncOptions })` and
-  `withConvexAction(client, ref, asyncOptions)` make the action return the
-  function's promise and apply `withAsync` to it. The callback may return a
-  promise of the arguments, or nothing when every argument is optional. The
-  optimistic update receives the mutation's arguments.
+  arguments without `paginationOpts`. While skipped, `results` is empty and
+  `status` is `Skipped`.
+- With `keepPreviousData: true`, `data` and `results` keep the previous
+  arguments' value while the new ones load, as Convex's `useStableQuery` recipe
+  does; `status` still reports loading.
+- On an action, `withConvexQuery` subscribes the query until its first result,
+  resolves with it or rejects with its error, and unsubscribes. A query that
+  another atom holds resolves at once.
+- `withConvexMutation` and `withConvexAction` make the action return the
+  function's promise. A failed call rejects with a `ConvexError` when the
+  function threw one. `withAsync`'s options go in the same object.
+- The action's callback may return a promise of the arguments, or nothing when
+  every argument is optional.
 - `client` is a client, or a function that returns one, such as an atom that
   holds it. The query extensions call it in their computeds, so they follow a
   client that changes, and the call extensions call it on every call.
@@ -113,10 +134,27 @@ addNote.ready(); // and the rest of withAsync
   doesn't fit gets a `withConvexQuery_ERROR` property instead of the query
   atoms.
 
+### Optimistic updates
+
+`optimisticUpdate` takes a function of the local store and the mutation's
+arguments, as `convex.mutation` does, or `updateQuery(atom, update)`, or a list
+of both. `updateQuery` changes the query an extended atom holds:
+
+- For `withConvexQuery`, `update(current, args, store)` returns the new value.
+- For `withConvexPaginatedQuery`, `update(page, args, { first, last }, store)`
+  runs for each loaded page and returns its items. `first` is the page that
+  starts the list and `last` the one that ends an exhausted list, so
+  `insertAtTop` and `insertAtBottomIfLoaded` from `convex/react` become one
+  condition each.
+- It runs only while the query has a value, for the arguments the atom holds
+  when the mutation is called, and its types come from the atom and the
+  mutation.
+
 The extensions create their atoms on first read, and `data` and `status` read
 the query's result directly, so an update recomputes as many atoms as reading
 `convex.query(ref, args).data` does. They only call the client, so they work
-with `reatomConvexClientFake()` too.
+with `reatomConvexClientFake()` too; the fake applies mutations through their
+handlers and ignores optimistic updates.
 
 ## Auth
 
