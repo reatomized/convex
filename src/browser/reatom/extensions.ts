@@ -239,15 +239,20 @@ export function withConvexQuery<Query extends QueryRef>(
     // update recomputes as many atoms as reading the entry directly.
     const ext: ConvexQueryExt<T> = defineLazy(target, {
       query: entryOf,
+      // A computed that takes its previous state costs more to build, so only
+      // `keepPreviousData` gets one.
       data: () =>
-        computed<T | undefined>((previous) => {
-          const current = entryOf()();
-          const result = current?.result();
-          if (result === undefined && current && options.keepPreviousData) {
-            return previous;
-          }
-          return result?.success ? (result.value as T) : undefined;
-        }, `${target.name}.data`),
+        options.keepPreviousData
+          ? computed<T | undefined>((previous) => {
+              const current = entryOf()();
+              const result = current?.result();
+              if (result === undefined && current) return previous;
+              return result?.success ? (result.value as T) : undefined;
+            }, `${target.name}.data`)
+          : computed((): T | undefined => {
+              const result = entryOf()()?.result();
+              return result?.success ? (result.value as T) : undefined;
+            }, `${target.name}.data`),
       error: () => computed(() => entryOf()()?.error(), `${target.name}.error`),
       status: () =>
         computed((): ConvexQueryStatus => {
@@ -369,18 +374,22 @@ export function withConvexPaginatedQuery<Query extends QueryRef>(
     return defineLazy(target, {
       query: paginated,
       results: () =>
-        computed<Item[]>((previous) => {
-          const current = paginated()();
-          if (current === undefined) return NO_RESULTS;
-          if (
-            options.keepPreviousData &&
-            previous !== undefined &&
-            current.status() === "LoadingFirstPage"
-          ) {
-            return previous;
-          }
-          return current.results();
-        }, `${target.name}.results`),
+        options.keepPreviousData
+          ? computed<Item[]>((previous) => {
+              const current = paginated()();
+              if (current === undefined) return NO_RESULTS;
+              if (
+                previous !== undefined &&
+                current.status() === "LoadingFirstPage"
+              ) {
+                return previous;
+              }
+              return current.results();
+            }, `${target.name}.results`)
+          : computed(
+              (): Item[] => paginated()()?.results() ?? NO_RESULTS,
+              `${target.name}.results`,
+            ),
       status: () =>
         computed(
           (): ConvexPaginatedQueryStatus =>
