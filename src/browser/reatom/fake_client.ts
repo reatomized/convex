@@ -2,7 +2,8 @@
  * A client whose functions are handlers a test registers, for UI tests and
  * stories without a deployment. Query handlers run inside computeds, so a
  * handler that reads atoms re-runs when they change, and a mutation handler
- * that writes them updates every query that reads them.
+ * that writes them updates every query that reads them. A mutation's
+ * optimistic update shows while its handler's promise is pending.
  *
  * Handlers and state are per Reatom context, like the real client's.
  */
@@ -14,6 +15,7 @@ import {
   peek,
   wrap,
   type Atom,
+  type Computed,
 } from "@reatom/core";
 import {
   FunctionArgs,
@@ -41,6 +43,7 @@ import type {
   ReatomQuery,
 } from "./client.js";
 import { identityFromToken } from "./fake_auth.js";
+import type { OptimisticLocalStore, OptimisticUpdate } from "convex/browser";
 import { reatomPaginatedQuery, ReatomPaginatedQuery } from "./paginated.js";
 import type { SocketState } from "./socket.js";
 
@@ -271,18 +274,75 @@ export function reatomConvexClientFake(
 
   let nextTraceId = 0;
   const entries = new Map<string, ReatomQuery>();
+  /** The handler outcomes of the queries in `entries`, without optimistic updates. */
+  const outcomes = new Map<string, Computed<Outcome>>();
+  const tokenOf = (udfPath: string, args: Record<string, Value>) =>
+    JSON.stringify({ udfPath, args: convexToJson(args) }) as QueryToken;
+
+  // Optimistic updates of pending mutations, applied in call order over the
+  // handlers' current results, so they replay when those change, as the real
+  // client replays them over server transitions.
+  type Layer = { udfPath: string; args: Record<string, Value>; value: unknown };
+  const pending = atom<ReadonlyArray<(store: OptimisticLocalStore) => void>>(
+    [],
+    `${name}._optimisticUpdates`,
+  );
+  const NO_LAYERS: ReadonlyMap<string, Layer> = new Map();
+  const handlerValue = (token: string) => {
+    const current = outcomes.get(token)?.();
+    return current?.status === "success" ? current.value : undefined;
+  };
+  const overlay = computed((): ReadonlyMap<string, Layer> => {
+    const updates = pending();
+    if (updates.length === 0) return NO_LAYERS;
+    const layers = new Map<string, Layer>();
+    const valueOf = (token: string) =>
+      layers.has(token) ? layers.get(token)!.value : handlerValue(token);
+    const store = {
+      getQuery: (query: unknown, args?: Record<string, Value>) =>
+        valueOf(tokenOf(functionName(query as string), parseArgs(args))),
+      getAllQueries: (query: unknown) => {
+        const udfPath = functionName(query as string);
+        const found: Array<{ args: Record<string, Value>; value: unknown }> =
+          [];
+        for (const [token, entry] of entries) {
+          if (entry.udfPath === udfPath) {
+            found.push({ args: entry.args, value: valueOf(token) });
+          }
+        }
+        for (const [token, layer] of layers) {
+          if (!entries.has(token) && layer.udfPath === udfPath) {
+            found.push({ args: layer.args, value: layer.value });
+          }
+        }
+        return found;
+      },
+      setQuery: (
+        query: unknown,
+        args: Record<string, Value>,
+        value: unknown,
+      ) => {
+        const udfPath = functionName(query as string);
+        const queryArgs = parseArgs(args);
+        layers.set(tokenOf(udfPath, queryArgs), {
+          udfPath,
+          args: queryArgs,
+          value,
+        });
+      },
+    } as unknown as OptimisticLocalStore;
+    for (const update of updates) update(store);
+    return layers;
+  }, `${name}._optimisticOverlay`);
   const queryEntry = (
     udfPath: string,
     args: Record<string, Value>,
   ): ReatomQuery => {
-    const token = JSON.stringify({
-      udfPath,
-      args: convexToJson(args),
-    }) as QueryToken;
+    const token = tokenOf(udfPath, args);
     const existing = entries.get(token);
     if (existing !== undefined) return existing;
     const trace = `${name}.query#${udfPath}#${nextTraceId++}`;
-    const outcome = computed((): Outcome => {
+    const handlerOutcome = computed((): Outcome => {
       const handler = handlers().query.get(udfPath);
       if (handler === undefined) throw miss("query", udfPath);
       let returned: unknown;
@@ -302,6 +362,15 @@ export function reatomConvexClientFake(
         value: received("query", udfPath, returned),
       };
     }, `${trace}.outcome`);
+    outcomes.set(token, handlerOutcome);
+    /** The handler's outcome under the optimistic updates of pending mutations. */
+    const outcome = computed((): Outcome => {
+      const layer = overlay().get(token);
+      if (layer === undefined) return handlerOutcome();
+      return layer.value === undefined
+        ? { status: "loading" }
+        : { status: "success", value: layer.value as Value };
+    }, `${trace}.visible`);
     const entry: ReatomQuery = {
       token,
       udfPath,
@@ -363,15 +432,27 @@ export function reatomConvexClientFake(
         udfPath: string,
         handler: AnyHandler,
         args: Record<string, Value>,
+        optimisticUpdate?: OptimisticUpdate<any>,
       ): Promise<any> => {
         const call = { type, at: new Date() };
         inflight.set((all) => [...all, call]);
+        // The update shows while the handler's promise is pending; a
+        // synchronous handler is its own result at once.
+        const layer =
+          optimisticUpdate &&
+          ((store: OptimisticLocalStore) => optimisticUpdate(store, args));
+        if (layer) pending.set((all) => [...all, layer]);
+        const settle = () => {
+          if (layer) pending.set((all) => all.filter((each) => each !== layer));
+        };
         try {
           // The server gets its own copy of the arguments.
           const serverArgs = jsonToConvex(convexToJson(args));
           const returned = handler(serverArgs, functionContext());
+          if (!(returned instanceof Promise)) settle();
           return received(type, udfPath, await wrap(Promise.resolve(returned)));
         } finally {
+          settle();
           inflight.set((all) => all.filter((current) => current !== call));
         }
       },
@@ -383,11 +464,12 @@ export function reatomConvexClientFake(
     type: "mutation" | "action",
     ref: unknown,
     args: Record<string, Value> | undefined,
+    optimisticUpdate?: OptimisticUpdate<any>,
   ) => {
     const udfPath = functionName(ref as string);
     const handler = peek(handlers)[type].get(udfPath);
     if (handler === undefined) throw miss(type, udfPath);
-    return requests[type](udfPath, handler, parseArgs(args));
+    return requests[type](udfPath, handler, parseArgs(args), optimisticUpdate);
   };
 
   const setAuth = action(
@@ -483,8 +565,13 @@ export function reatomConvexClientFake(
         parseArgs(args as Record<string, Value>),
         { initialNumItems: options.initialNumItems, id: options.id ?? -1 },
       ) as ReatomPaginatedQuery<any>,
-    mutation: (mutation, args) =>
-      call("mutation", mutation, args as Record<string, Value> | undefined),
+    mutation: (mutation, args, options) =>
+      call(
+        "mutation",
+        mutation,
+        args as Record<string, Value> | undefined,
+        options?.optimisticUpdate,
+      ),
     action: (action, args) =>
       call("action", action, args as Record<string, Value> | undefined),
     setAuth,

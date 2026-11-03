@@ -34,6 +34,7 @@ mise exec dprint@0.51.1 -- dprint check
 | `src/browser/reatom/auth.ts`                   | Token fetch, server confirmation, scheduled refetch, reauthentication                     |
 | `src/browser/reatom/client.ts`                 | Query entries, query set and identity versions, requests, optimistic updates, transitions |
 | `src/browser/reatom/paginated.ts`              | Page lists derived from page query results, splits                                        |
+| `src/browser/reatom/extensions.ts`             | `withConvexQuery`, `withConvexMutation` and the other extensions over the client's calls  |
 | `src/browser/reatom/testing.ts`                | The `testing` entry: fakes for UI tests and stories                                       |
 | `src/browser/reatom/fake_client.ts`            | A client whose functions are handlers, `reatomConvexClientFake`                           |
 | `src/browser/reatom/fake_auth.ts`              | Identities in unsigned JWTs, an auth library fake and an auth state fake                  |
@@ -90,6 +91,8 @@ checkpoints, since the Reatom client batches them. The `deviations` tests pin
 the differences the README lists.
 
 `src/browser/reatom/client.test.ts` covers the Reatom API.
+`src/browser/reatom/extensions.test.ts` runs the extensions on the real client,
+over the scripted server, and on the fake, and checks their inferred types.
 `src/browser/reatom/testing.test.ts` covers the fakes and runs one consumer
 model on both the real client, over the scripted server, and the fake.
 `packages/convex-storybook/test` checks the addon's inferred `parameters`, like

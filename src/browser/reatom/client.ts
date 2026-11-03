@@ -346,23 +346,26 @@ type Request = {
   | { status: "Completed"; result: FunctionResult; ts: TS }
 );
 
-type QueryRef =
+/** A query reference, or a function path. */
+export type QueryRef =
   | FunctionReference<"query">
   | FunctionReference_future<"query">
   | string;
-type MutationRef =
+/** A mutation reference, or a function path. */
+export type MutationRef =
   | FunctionReference<"mutation">
   | FunctionReference_future<"mutation">
   | string;
-type ActionRef =
+/** An action reference, or a function path. */
+export type ActionRef =
   | FunctionReference<"action">
   | FunctionReference_future<"action">
   | string;
 type AnyRef = FunctionReference<any, any> | FunctionReference_future<any, any>;
-type ReturnOf<Ref> = Ref extends AnyRef ? FunctionReturnType<Ref> : any;
-type PaginatedItemOf<Ref> =
+export type ReturnOf<Ref> = Ref extends AnyRef ? FunctionReturnType<Ref> : any;
+export type PaginatedItemOf<Ref> =
   ReturnOf<Ref> extends { page: Array<infer Item> } ? Item : any;
-type ArgsOf<Ref> = Ref extends AnyRef
+export type ArgsOf<Ref> = Ref extends AnyRef
   ? FunctionArgs<Ref>
   : Record<string, Value>;
 
