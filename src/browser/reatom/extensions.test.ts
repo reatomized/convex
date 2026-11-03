@@ -195,6 +195,14 @@ describe("withConvexQuery", () => {
     });
   });
 
+  test("refuses an atom that already has one of its atoms", () => {
+    const convex = reatomConvexClientFake();
+    const taken = atom({ id: 1 }, "taken").extend(() => ({ status: 1 }));
+    expect(() => taken.extend(withConvexQuery(convex, get))).toThrow(
+      "taken already has status",
+    );
+  });
+
   test("types the state, the arguments and the result", () => {
     const convex = reatomConvexClientFake();
     const note = atom({ id: 1 }, "note").extend(withConvexQuery(convex, get));

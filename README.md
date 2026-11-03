@@ -113,8 +113,10 @@ addNote.ready(); // and the rest of withAsync
   doesn't fit gets a `withConvexQuery_ERROR` property instead of the query
   atoms.
 
-The extensions only call the client, so they work with
-`reatomConvexClientFake()` too.
+The extensions create their atoms on first read, and `data` and `status` read
+the query's result directly, so an update recomputes as many atoms as reading
+`convex.query(ref, args).data` does. They only call the client, so they work
+with `reatomConvexClientFake()` too.
 
 ## Auth
 
