@@ -603,6 +603,36 @@ describe("updateQuery", () => {
     await frame.run(() => convex.close());
   });
 
+  test("updates a fake's query while its handler is pending", async () => {
+    const frame = context.start();
+    const convex = reatomConvexClientFake();
+    const stored = atom<string[]>([], "stored");
+    let release!: () => void;
+    frame.run(() => {
+      convex.handleQuery(list, () => stored());
+      convex.handleMutation(add, async ({ text }) => {
+        await wrap(new Promise<void>((resolve) => (release = resolve)));
+        stored.set((all) => [...all, text]);
+        return text;
+      });
+    });
+    const notes = atom({}, "notes").extend(withConvexQuery(convex, list));
+    const addNote = action((text: string) => ({ text }), "addNote").extend(
+      withConvexMutation(convex, add, {
+        optimisticUpdate: updateQuery(notes, (current, { text }) => [
+          ...current,
+          `${text}?`,
+        ]),
+      }),
+    );
+    frame.run(() => notes.data.subscribe(noop));
+    const done = frame.run(() => addNote("a"));
+    frame.run(() => expect(notes.data()).toEqual(["a?"]));
+    release();
+    await expect(done).resolves.toBe("a");
+    frame.run(() => expect(notes.data()).toEqual(["a"]));
+  });
+
   test("leaves a skipped atom alone", async () => {
     const frame = context.start();
     const convex = reatomConvexClientFake();
