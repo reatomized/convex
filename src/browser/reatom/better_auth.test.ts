@@ -383,3 +383,13 @@ test("requests aren't shared while the session loads", async () => {
   void frame.run(() => provider.fetchToken({ forceRefreshToken: false }));
   expect(fake.tokenRequests).toHaveLength(2);
 });
+
+test("requests aren't shared while signed out", async () => {
+  const frame = context.start();
+  const fake = fakeClient();
+  fake.setSession({ data: null, isPending: false });
+  const provider = reatomBetterAuthProvider(fake.client);
+  void frame.run(() => provider.fetchToken({ forceRefreshToken: false }));
+  void frame.run(() => provider.fetchToken({ forceRefreshToken: false }));
+  expect(fake.tokenRequests).toHaveLength(2);
+});

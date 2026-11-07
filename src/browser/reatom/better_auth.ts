@@ -136,8 +136,7 @@ export function reatomBetterAuthProvider<Client extends BetterAuthClient>(
   // Boxed, so the atom holds the request rather than its result.
   const pending = atom<{
     request: Promise<string | null>;
-    /** The store's session id, `null` while it loads. */
-    session: string | null | undefined;
+    session: string | undefined;
   } | null>(null, `${name}._pending`);
 
   const state = atom(
@@ -223,13 +222,14 @@ export function reatomBetterAuthProvider<Client extends BetterAuthClient>(
         (store.isPending || (id && (!owner || owner === id)))
       )
         return cached;
-      // While the store loads, the session a request answers for is unknown.
-      const session = store.isPending ? null : id;
+      // Shared only within a loaded session: while the store loads or is
+      // signed out, the session a request answers for is unknown.
+      const session = store.isPending ? undefined : id;
       const inFlight = peek(pending);
       if (
         inFlight &&
         !forceRefreshToken &&
-        session !== null &&
+        session &&
         inFlight.session === session
       )
         return await wrap(inFlight.request);
