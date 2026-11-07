@@ -415,3 +415,22 @@ test("an unforced fetch waits for a refresh over the cached token", async () => 
   fake.tokenRequests.shift()!("fresh");
   expect(await Promise.all([refresh, unforced])).toEqual(["fresh", "fresh"]);
 });
+
+test("a refresh of the initial token outlasts its session's hydration", async () => {
+  const frame = context.start();
+  const fake = fakeClient();
+  const provider = reatomBetterAuthProvider(fake.client, {
+    initialToken: jwt({ sub: "user1", sessionId: "s1" }),
+  });
+  const refresh = frame.run(() =>
+    provider.fetchToken({ forceRefreshToken: true }),
+  );
+  fake.setSession({ data: { session: { id: "s1" } }, isPending: false });
+  const unforced = frame.run(() =>
+    provider.fetchToken({ forceRefreshToken: false }),
+  );
+  expect(fake.tokenRequests).toHaveLength(1);
+  const fresh = jwt({ sub: "user1", sessionId: "s1", n: 2 });
+  fake.tokenRequests.shift()!(fresh);
+  expect(await Promise.all([refresh, unforced])).toEqual([fresh, fresh]);
+});
