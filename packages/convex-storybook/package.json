@@ -51,7 +51,7 @@
   },
   "devDependencies": {
     "@reatomized/convex": "file:../..",
-    "storybook": "^10.6.5"
+    "storybook": "^10.6.6"
   },
   "publishConfig": {
     "access": "public"

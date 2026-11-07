@@ -118,6 +118,7 @@ test("follows the session store and caches the Convex token", async () => {
 test("shares one request among unforced fetches", async () => {
   const frame = context.start();
   const fake = fakeClient();
+  fake.setSession({ data: { session: { id: "s1" } }, isPending: false });
   const provider = reatomBetterAuthProvider(fake.client);
   const tokens = frame.run(() => [
     provider.fetchToken({ forceRefreshToken: false }),
@@ -235,4 +236,160 @@ test("one-time token completion survives reconnect", async () => {
   expect(fake.client.getSession).toHaveBeenCalledTimes(1);
   expect(fake.client.updateSession).toHaveBeenCalledTimes(1);
   stop();
+});
+
+test("a request from the previous session doesn't answer for the next", async () => {
+  const frame = context.start();
+  const fake = fakeClient();
+  const provider = reatomBetterAuthProvider(fake.client);
+  frame.run(() => provider.session.subscribe(noop));
+  await settle();
+  fake.setSession({ data: { session: { id: "s1" } }, isPending: false });
+  const first = frame.run(() =>
+    provider.fetchToken({ forceRefreshToken: false }),
+  );
+
+  fake.setSession({ data: { session: { id: "s2" } }, isPending: false });
+  const second = frame.run(() =>
+    provider.fetchToken({ forceRefreshToken: false }),
+  );
+  expect(fake.tokenRequests).toHaveLength(2);
+  fake.tokenRequests.shift()!("alice");
+  expect(await first).toBe("alice");
+  frame.run(() => expect(provider.token()).toBeNull());
+  fake.tokenRequests.shift()!("bob");
+  expect(await second).toBe("bob");
+  frame.run(() => expect(provider.token()).toBe("bob"));
+});
+
+test("an initial token for another session is dropped when the session loads", async () => {
+  const frame = context.start();
+  const fake = fakeClient();
+  const provider = reatomBetterAuthProvider(fake.client, {
+    initialToken: jwt({ sub: "user1", sessionId: "s1" }),
+  });
+  frame.run(() => provider.session.subscribe(noop));
+  await settle();
+  fake.setSession({ data: { session: { id: "s2" } }, isPending: false });
+  frame.run(() => expect(provider.token()).toBeNull());
+  void frame.run(() => provider.fetchToken({ forceRefreshToken: false }));
+  expect(fake.tokenRequests).toHaveLength(1);
+});
+
+test("hydrating the initial token's session keeps the token and session", async () => {
+  const frame = context.start();
+  const convex = reatomConvexClient(URL, clientOptions(server));
+  const fake = fakeClient();
+  const initialToken = jwt({ sub: "user1", sessionId: "s1" });
+  const provider = reatomBetterAuthProvider(fake.client, { initialToken });
+  const auth = reatomAuthState(convex, provider);
+  const unsubscribe = frame.run(() => auth.status.subscribe(noop));
+  await settle();
+  server.open();
+  await settle();
+  server.transition([]);
+  await settle();
+  frame.run(() => expect(provider.session()).toBe("s1"));
+
+  fake.setSession({ data: { session: { id: "s1" } }, isPending: false });
+  await settle();
+  frame.run(() => {
+    expect(provider.session()).toBe("s1");
+    expect(provider.token()).toBe(initialToken);
+    expect(auth.status()).toBe("authenticated");
+  });
+  expect(
+    trace.filter((entry) => entry.received === "Authenticate"),
+  ).toHaveLength(1);
+  unsubscribe();
+  await frame.run(() => convex.close());
+});
+
+test("an initial token for another session isn't sent for a loaded session", async () => {
+  const frame = context.start();
+  const convex = reatomConvexClient(URL, clientOptions(server));
+  const fake = fakeClient();
+  fake.setSession({ data: { session: { id: "s2" } }, isPending: false });
+  const provider = reatomBetterAuthProvider(fake.client, {
+    initialToken: jwt({ sub: "user1", sessionId: "s1" }),
+  });
+  const auth = reatomAuthState(convex, provider);
+  const unsubscribe = frame.run(() => auth.status.subscribe(noop));
+  await settle();
+  expect(fake.tokenRequests).toHaveLength(1);
+  fake.tokenRequests.shift()!(jwt({ sub: "user2", sessionId: "s2" }));
+  await settle();
+  server.open();
+  await settle();
+  expect(
+    trace
+      .filter((entry) => entry.received === "Authenticate")
+      .map((entry) => entry.value),
+  ).toEqual([jwt({ sub: "user2", sessionId: "s2" })]);
+  unsubscribe();
+  await frame.run(() => convex.close());
+});
+
+test("an initial token is checked against the store's current session", async () => {
+  const frame = context.start();
+  const fake = fakeClient();
+  const initialToken = jwt({ sub: "user1", sessionId: "s1" });
+  const provider = reatomBetterAuthProvider(fake.client, { initialToken });
+  expect(
+    await frame.run(() => provider.fetchToken({ forceRefreshToken: false })),
+  ).toBe(initialToken);
+  fake.setSession({ data: { session: { id: "s2" } }, isPending: false });
+  void frame.run(() => provider.fetchToken({ forceRefreshToken: false }));
+  expect(fake.tokenRequests).toHaveLength(1);
+});
+
+test("a request for one session isn't shared with the next", async () => {
+  const frame = context.start();
+  const fake = fakeClient();
+  fake.setSession({ data: { session: { id: "s1" } }, isPending: false });
+  const provider = reatomBetterAuthProvider(fake.client);
+  void frame.run(() => provider.fetchToken({ forceRefreshToken: false }));
+  fake.setSession({ data: { session: { id: "s2" } }, isPending: false });
+  void frame.run(() => provider.fetchToken({ forceRefreshToken: false }));
+  expect(fake.tokenRequests).toHaveLength(2);
+});
+
+test("an initial token isn't used once the store is signed out", async () => {
+  const frame = context.start();
+  const fake = fakeClient();
+  fake.setSession({ data: null, isPending: false });
+  const provider = reatomBetterAuthProvider(fake.client, {
+    initialToken: jwt({ sub: "user1", sessionId: "s1" }),
+  });
+  void frame.run(() => provider.fetchToken({ forceRefreshToken: false }));
+  expect(fake.tokenRequests).toHaveLength(1);
+});
+
+test("a request from before sign-out isn't shared after it", async () => {
+  const frame = context.start();
+  const fake = fakeClient();
+  const provider = reatomBetterAuthProvider(fake.client);
+  void frame.run(() => provider.fetchToken({ forceRefreshToken: false }));
+  fake.setSession({ data: null, isPending: false });
+  void frame.run(() => provider.fetchToken({ forceRefreshToken: false }));
+  expect(fake.tokenRequests).toHaveLength(2);
+});
+
+test("requests aren't shared while the session loads", async () => {
+  const frame = context.start();
+  const fake = fakeClient();
+  const provider = reatomBetterAuthProvider(fake.client);
+  void frame.run(() => provider.fetchToken({ forceRefreshToken: false }));
+  void frame.run(() => provider.fetchToken({ forceRefreshToken: false }));
+  expect(fake.tokenRequests).toHaveLength(2);
+});
+
+test("requests aren't shared while signed out", async () => {
+  const frame = context.start();
+  const fake = fakeClient();
+  fake.setSession({ data: null, isPending: false });
+  const provider = reatomBetterAuthProvider(fake.client);
+  void frame.run(() => provider.fetchToken({ forceRefreshToken: false }));
+  void frame.run(() => provider.fetchToken({ forceRefreshToken: false }));
+  expect(fake.tokenRequests).toHaveLength(2);
 });

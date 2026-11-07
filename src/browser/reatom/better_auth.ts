@@ -31,6 +31,18 @@ type SessionData<Client extends BetterAuthClient> = ReturnType<
   Client["useSession"]["get"]
 >["data"];
 
+/** The better-auth session id that the convex plugin puts in its JWTs. */
+const tokenSessionId = (token: string): string | undefined => {
+  try {
+    const { sessionId } = JSON.parse(
+      atob(token.split(".")[1]!.replace(/-/g, "+").replace(/_/g, "/")),
+    );
+    return typeof sessionId === "string" ? sessionId : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 /**
  * What the provider uses of a client from better-auth's `createAuthClient`
  * (`better-auth/client`) with `@convex-dev/better-auth`'s `convexClient()`
@@ -68,7 +80,10 @@ export type BetterAuthClient = {
 
 /** @public */
 export type BetterAuthOptions = {
-  /** A Convex token from server rendering, used until the session loads. */
+  /**
+   * A Convex token from server rendering, used until the session loads and
+   * kept if its `sessionId` claim names the loaded session.
+   */
   initialToken?: string | null;
   /**
    * Whether an `ott` query param on start is a one-time token to sign in with;
@@ -119,10 +134,10 @@ export function reatomBetterAuthProvider<Client extends BetterAuthClient>(
     `${name}.token`,
   );
   // Boxed, so the atom holds the request rather than its result.
-  const pending = atom<{ request: Promise<string | null> } | null>(
-    null,
-    `${name}._pending`,
-  );
+  const pending = atom<{
+    request: Promise<string | null>;
+    session: string | undefined;
+  } | null>(null, `${name}._pending`);
 
   const state = atom(
     () =>
@@ -133,12 +148,18 @@ export function reatomBetterAuthProvider<Client extends BetterAuthClient>(
       void abortVar.spawn(start);
       return authClient.useSession.subscribe(
         wrap((value: SessionState) => {
-          const previous = peek(target).data?.session?.id;
+          const cached = peek(token);
+          const owner =
+            peek(target).data?.session?.id ??
+            (cached ? tokenSessionId(cached) : undefined);
           target.set(value as ReturnType<Client["useSession"]["get"]>);
           if (value.isPending) return;
-          // The cached token belongs to the previous session, or to none.
+          // Tokens, cached or requested, of another session are dropped.
           const id = value.data?.session?.id;
-          if (!id || (previous && id !== previous)) token.set(null);
+          if (!id || id !== owner) {
+            token.set(null);
+            pending.set(null);
+          }
         }),
       );
     }),
@@ -190,20 +211,39 @@ export function reatomBetterAuthProvider<Client extends BetterAuthClient>(
   const fetchToken: AuthTokenFetcher = action(
     async ({ forceRefreshToken }: { forceRefreshToken: boolean }) => {
       const cached = token();
-      if (cached && !forceRefreshToken) return cached;
+      // The store can change before its listener runs. A cached token stands
+      // in while it loads, and then must be the loaded session's.
+      const store = authClient.useSession.get();
+      const id = store.data?.session?.id;
+      const owner = cached ? tokenSessionId(cached) : undefined;
+      if (
+        cached &&
+        !forceRefreshToken &&
+        (store.isPending || (id && (!owner || owner === id)))
+      )
+        return cached;
+      // Shared only within a loaded session: while the store loads or is
+      // signed out, the session a request answers for is unknown.
+      const session = store.isPending ? undefined : id;
       const inFlight = peek(pending);
-      if (inFlight && !forceRefreshToken) return await wrap(inFlight.request);
+      if (
+        inFlight &&
+        !forceRefreshToken &&
+        session &&
+        inFlight.session === session
+      )
+        return await wrap(inFlight.request);
       const request = authClient.convex
         .token({ fetchOptions: { throw: false } })
         .then(
           ({ data }) => data?.token || null,
           () => null,
         );
-      const box = { request };
+      const box = { request, session };
       pending.set(box);
       try {
         const value = await wrap(request);
-        token.set(value);
+        if (peek(pending) === box) token.set(value);
         return value;
       } finally {
         if (peek(pending) === box) pending.set(null);
@@ -222,7 +262,10 @@ export function reatomBetterAuthProvider<Client extends BetterAuthClient>(
     session: computed(() => {
       const id = state().data?.session?.id;
       if (id) return id;
-      return token() === null ? null : "initialToken";
+      const initial = token();
+      return initial === null
+        ? null
+        : (tokenSessionId(initial) ?? "initialToken");
     }, `${name}.session`),
     fetchToken,
     token,

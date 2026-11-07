@@ -265,6 +265,7 @@ export function reatomConvexClientFake(
     } catch (error) {
       throw new Error(
         `The fake ${type} handler for ${udfPath} returned a value Convex can't send: ${asError(error).message}`,
+        { cause: error },
       );
     }
   };
