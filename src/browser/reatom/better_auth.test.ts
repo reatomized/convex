@@ -393,3 +393,44 @@ test("requests aren't shared while signed out", async () => {
   void frame.run(() => provider.fetchToken({ forceRefreshToken: false }));
   expect(fake.tokenRequests).toHaveLength(2);
 });
+
+test("an unforced fetch waits for a refresh over the cached token", async () => {
+  const frame = context.start();
+  const fake = fakeClient();
+  fake.setSession({ data: { session: { id: "s1" } }, isPending: false });
+  const provider = reatomBetterAuthProvider(fake.client);
+  const first = frame.run(() =>
+    provider.fetchToken({ forceRefreshToken: false }),
+  );
+  fake.tokenRequests.shift()!("rejected");
+  expect(await first).toBe("rejected");
+
+  const refresh = frame.run(() =>
+    provider.fetchToken({ forceRefreshToken: true }),
+  );
+  const unforced = frame.run(() =>
+    provider.fetchToken({ forceRefreshToken: false }),
+  );
+  expect(fake.tokenRequests).toHaveLength(1);
+  fake.tokenRequests.shift()!("fresh");
+  expect(await Promise.all([refresh, unforced])).toEqual(["fresh", "fresh"]);
+});
+
+test("a refresh of the initial token outlasts its session's hydration", async () => {
+  const frame = context.start();
+  const fake = fakeClient();
+  const provider = reatomBetterAuthProvider(fake.client, {
+    initialToken: jwt({ sub: "user1", sessionId: "s1" }),
+  });
+  const refresh = frame.run(() =>
+    provider.fetchToken({ forceRefreshToken: true }),
+  );
+  fake.setSession({ data: { session: { id: "s1" } }, isPending: false });
+  const unforced = frame.run(() =>
+    provider.fetchToken({ forceRefreshToken: false }),
+  );
+  expect(fake.tokenRequests).toHaveLength(1);
+  const fresh = jwt({ sub: "user1", sessionId: "s1", n: 2 });
+  fake.tokenRequests.shift()!(fresh);
+  expect(await Promise.all([refresh, unforced])).toEqual([fresh, fresh]);
+});

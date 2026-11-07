@@ -210,21 +210,15 @@ export function reatomBetterAuthProvider<Client extends BetterAuthClient>(
 
   const fetchToken: AuthTokenFetcher = action(
     async ({ forceRefreshToken }: { forceRefreshToken: boolean }) => {
-      const cached = token();
-      // The store can change before its listener runs. A cached token stands
-      // in while it loads, and then must be the loaded session's.
+      // The store can change before its listener runs.
       const store = authClient.useSession.get();
       const id = store.data?.session?.id;
+      const cached = token();
       const owner = cached ? tokenSessionId(cached) : undefined;
-      if (
-        cached &&
-        !forceRefreshToken &&
-        (store.isPending || (id && (!owner || owner === id)))
-      )
-        return cached;
-      // Shared only within a loaded session: while the store loads or is
-      // signed out, the session a request answers for is unknown.
-      const session = store.isPending ? undefined : id;
+      // A request answers for the loaded session, or while the store loads
+      // for the cached token's; signed out, for none. It comes first, as it
+      // may be replacing a rejected cached token.
+      const session = store.isPending ? owner : id;
       const inFlight = peek(pending);
       if (
         inFlight &&
@@ -233,6 +227,14 @@ export function reatomBetterAuthProvider<Client extends BetterAuthClient>(
         inFlight.session === session
       )
         return await wrap(inFlight.request);
+      // A cached token stands in while the store loads, and then must be the
+      // loaded session's.
+      if (
+        cached &&
+        !forceRefreshToken &&
+        (store.isPending || (id && (!owner || owner === id)))
+      )
+        return cached;
       const request = authClient.convex
         .token({ fetchOptions: { throw: false } })
         .then(
