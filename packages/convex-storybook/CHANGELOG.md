@@ -1,5 +1,14 @@
 # @reatomized/convex-storybook
 
+## 0.1.2
+
+### Patch Changes
+
+- 6d9bb0c: Update the Convex baseline and minimum peer dependency to 1.50.0. The
+  sync protocol and upstream client helpers are unchanged from 1.49.0.
+- Updated dependencies [6d9bb0c]
+  - @reatomized/convex@0.5.1
+
 ## 0.1.1
 
 ### Patch Changes

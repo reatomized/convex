@@ -1,5 +1,12 @@
 # @reatomized/convex
 
+## 0.5.1
+
+### Patch Changes
+
+- 6d9bb0c: Update the Convex baseline and minimum peer dependency to 1.50.0. The
+  sync protocol and upstream client helpers are unchanged from 1.49.0.
+
 ## 0.5.0
 
 ### Minor Changes
