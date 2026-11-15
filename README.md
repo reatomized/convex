@@ -12,7 +12,7 @@ npm install @reatomized/convex convex @reatom/core
 
 `convex` and `@reatom/core` are peer dependencies. The client takes function
 references and `ConvexError` from your `convex`, and its atoms live in your
-app's Reatom context. It speaks the sync protocol of convex 1.49.0.
+app's Reatom context. It speaks the sync protocol of convex 1.50.0.
 
 ## Usage
 
@@ -306,9 +306,9 @@ installs from a URL only with `--allow-remote`):
 npm install --allow-remote=root @reatom/core@https://pkg.pr.new/@reatom/core@5f42184
 ```
 
-Convex 1.49.0 requires Node 22 or later, which has a global `WebSocket`.
+Convex 1.50.0 requires Node 22 or later, which has a global `WebSocket`.
 
-## Differences from convex/browser 1.48.0
+## Differences from convex/browser
 
 - Query set changes are batched per microtask instead of sent one per subscribe
   and unsubscribe.
@@ -327,13 +327,17 @@ Convex 1.49.0 requires Node 22 or later, which has a global `WebSocket`.
   convex/browser it throws out of the WebSocket message handler.
 - Server results stay visible across a reconnect until the new connection
   answers.
-- Minified, the client is 13.8 KiB gzip, or 19.0 KiB with the parts of
-  `convex/values` and `convex/server` it uses, against 15.8 KiB for
-  convex/browser's `BaseConvexClient`. The Reatom functions it uses add 4.6 KiB,
-  shared with the rest of the app.
+
+The size and timing measurements below used `@reatomized/convex` 0.3.0 and
+`convex` 1.48.0.
+
+Minified, the client was 13.8 KiB gzip, or 19.0 KiB with the parts of
+`convex/values` and `convex/server` it used, against 15.8 KiB for
+convex/browser's `BaseConvexClient`. The Reatom functions it used added 4.6 KiB,
+shared with the rest of the app.
 
 With 1000 components each running its own query in Chromium and @reatom/jsx
-rendering, mounting takes 6.28 ms against 54.2 ms for convex/react, unmounting
+rendering, mounting took 6.28 ms against 54.2 ms for convex/react, unmounting
 0.75 ms against 7.93 ms.
 [CONTRIBUTING.md](https://github.com/reatomized/convex/blob/reatom/CONTRIBUTING.md#performance)
 has the full table and how it was measured.
