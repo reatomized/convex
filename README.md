@@ -262,13 +262,13 @@ convex.handleMutation(api.notes.add, ({ text }, { identity }) => {
 - Returning `loading` keeps a query loading. A handler that throws fails the
   query with that error in `error`, so a `ConvexError` keeps its `data`. Query
   handlers are synchronous; mutation and action handlers may return promises.
-- A mutation's optimistic update shows while its handler's promise is pending
-  and replays over what the query handlers return, as the real client replays it
-  over server results. A synchronous handler's result replaces it at once. A
-  query opened while the mutation is pending shows it too. Unlike the real
-  client, `store.getAllQueries` lists every query the fake has opened, not only
-  those with a current subscriber, and an optimistic update that throws fails
-  every query read while it is pending instead of the mutation call.
+- A mutation's optimistic update shows until its handler's promise settles, as
+  the real client shows it until the server answers. That includes queries
+  opened during that time, and it replays over what the query handlers return
+  when they change. A synchronous handler's result replaces it at once. Unlike
+  the real client, `store.getAllQueries` lists every query the fake has opened,
+  not only those with a current subscriber, and an optimistic update that throws
+  fails every query read while it is pending instead of the mutation call.
 - Results go through `convexToJson`, as on the wire: `undefined` arrives as
   `null`, and a value Convex can't send fails the call.
 - A function without a handler throws `MissingHandlerError` naming it: on read
