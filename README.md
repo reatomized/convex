@@ -268,7 +268,7 @@ convex.handleMutation(api.notes.add, ({ text }, { identity }) => {
   query opened while the mutation is pending shows it too. Unlike the real
   client, `store.getAllQueries` lists every query the fake has opened, not only
   those with a current subscriber, and an optimistic update that throws fails
-  the reads of the queries it would change instead of the mutation call.
+  every query read while it is pending instead of the mutation call.
 - Results go through `convexToJson`, as on the wire: `undefined` arrives as
   `null`, and a value Convex can't send fails the call.
 - A function without a handler throws `MissingHandlerError` naming it: on read

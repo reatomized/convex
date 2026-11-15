@@ -171,23 +171,25 @@ const firstResult = (entry: ReatomQuery): Promise<Value> =>
       unsubscribe?.();
       abort?.unsubscribe();
     };
+    // Throws if the frame is already aborted.
     abort = abortVar.subscribe((error) => {
       if (settled) return;
       finish();
       reject(error);
     });
-    if (settled) {
-      abort.unsubscribe();
-      return;
+    try {
+      unsubscribe = entry.result.subscribe(
+        (result: FunctionResult | undefined) => {
+          if (result === undefined || settled) return;
+          finish();
+          if (result.success) resolve(result.value);
+          else reject(functionError("query", entry.udfPath, result));
+        },
+      );
+    } catch (error) {
+      finish();
+      throw error;
     }
-    unsubscribe = entry.result.subscribe(
-      (result: FunctionResult | undefined) => {
-        if (result === undefined || settled) return;
-        finish();
-        if (result.success) resolve(result.value);
-        else reject(functionError("query", entry.udfPath, result));
-      },
-    );
     // A result already held settles during `subscribe`.
     if (settled) finish();
   });
