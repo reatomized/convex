@@ -59,7 +59,13 @@ as `@reatom/react` or `@reatom/jsx`.
 
 The same calls as Reatom extensions, for models built from atoms and actions. An
 atom whose state is a query's arguments gets the query's state; an action that
-returns a function's arguments calls the function:
+returns a function's arguments calls the function.
+
+They are optional. Everything they do is also possible with `convex.query`,
+`convex.paginatedQuery` and `convex.mutation` directly, including optimistic
+updates; the extensions keep arguments, `"skip"`, loading and errors on one atom
+and type the optimistic updates from it. The package has no side effects, so a
+bundle that doesn't import them leaves them out.
 
 ```ts
 import {
@@ -120,7 +126,8 @@ const loaded = await wrap(loadNote(id));
   does; `status` still reports loading.
 - On an action, `withConvexQuery` subscribes the query until its first result,
   resolves with it or rejects with its error, and unsubscribes. A query that
-  another atom holds resolves at once.
+  another atom holds and that already has a result resolves at once. An abort of
+  the call, such as from `withAbort`, rejects it and unsubscribes the query.
 - `withConvexMutation` and `withConvexAction` make the action return the
   function's promise. A failed call rejects with a `ConvexError` when the
   function threw one. `withAsync`'s options go in the same object.
@@ -128,7 +135,11 @@ const loaded = await wrap(loadNote(id));
   every argument is optional.
 - `client` is a client, or a function that returns one, such as an atom that
   holds it. The query extensions call it in their computeds, so they follow a
-  client that changes, and the call extensions call it on every call.
+  client that changes. The call extensions call it when the action is called,
+  before a promise of the arguments resolves.
+- `withConvexQuery` takes one options type for both targets: `journal` applies
+  to both, `keepPreviousData` only to an atom, and `withAsync`'s options only to
+  an action. Options for the other target are ignored.
 - The atom's state and the action's return value are checked against the
   function's arguments. Like Reatom's own extensions, a query atom whose state
   doesn't fit gets a `withConvexQuery_ERROR` property instead of the query
@@ -148,7 +159,12 @@ of both. `updateQuery` changes the query an extended atom holds:
   condition each.
 - It runs only while the query has a value, for the arguments the atom holds
   when the mutation is called, and its types come from the atom and the
-  mutation.
+  mutation. Those are the arguments when the action is called, even when its
+  callback returns a promise of the mutation's arguments.
+- With `keepPreviousData`, the value the atom shows while new arguments load
+  belongs to the previous arguments. `updateQuery` updates the query of the
+  current arguments, which has no value yet, so a mutation started then shows no
+  optimistic change.
 
 The extensions create their atoms on first read, and `data` and `status` read
 the query's result directly, so an update recomputes as many atoms as reading
@@ -248,7 +264,11 @@ convex.handleMutation(api.notes.add, ({ text }, { identity }) => {
   handlers are synchronous; mutation and action handlers may return promises.
 - A mutation's optimistic update shows while its handler's promise is pending
   and replays over what the query handlers return, as the real client replays it
-  over server results. A synchronous handler's result replaces it at once.
+  over server results. A synchronous handler's result replaces it at once. A
+  query opened while the mutation is pending shows it too. Unlike the real
+  client, `store.getAllQueries` lists every query the fake has opened, not only
+  those with a current subscriber, and an optimistic update that throws fails
+  the reads of the queries it would change instead of the mutation call.
 - Results go through `convexToJson`, as on the wire: `undefined` arrives as
   `null`, and a value Convex can't send fails the call.
 - A function without a handler throws `MissingHandlerError` naming it: on read
