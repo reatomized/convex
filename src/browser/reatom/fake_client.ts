@@ -288,6 +288,11 @@ export function reatomConvexClientFake(
     [],
     `${name}._optimisticUpdates`,
   );
+  /**
+   * Bumped when a query opens while updates are pending, so they replay over
+   * it: `entries` and `outcomes` are plain maps the overlay can't depend on.
+   */
+  const opened = atom(0, `${name}._openedQueries`);
   const NO_LAYERS: ReadonlyMap<string, Layer> = new Map();
   const handlerValue = (token: string) => {
     const current = outcomes.get(token)?.();
@@ -296,6 +301,7 @@ export function reatomConvexClientFake(
   const overlay = computed((): ReadonlyMap<string, Layer> => {
     const updates = pending();
     if (updates.length === 0) return NO_LAYERS;
+    opened();
     const layers = new Map<string, Layer>();
     const valueOf = (token: string) =>
       layers.has(token) ? layers.get(token)!.value : handlerValue(token);
@@ -403,6 +409,7 @@ export function reatomConvexClientFake(
       status: computed((): QueryStatus => outcome().status, `${trace}.status`),
     };
     entries.set(token, entry);
+    if (peek(pending).length > 0) opened.set((count) => count + 1);
     return entry;
   };
 

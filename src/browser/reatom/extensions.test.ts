@@ -4,6 +4,7 @@ import {
   computed,
   context,
   noop,
+  withAbort,
   withActions,
   wrap,
   type Action,
@@ -500,6 +501,42 @@ describe("withConvexQuery on an action", () => {
     await frame.run(() => convex.close());
   });
 
+  test("an abort rejects and unsubscribes before a result", async () => {
+    const frame = context.start();
+    const convex = reatomConvexClient(URL, clientOptions(server));
+    const loadNote = action((id: number) => ({ id }), "loadNote").extend(
+      withConvexQuery(convex, get),
+      withAbort(),
+    );
+    const loaded = frame.run(() => loadNote(1));
+    await settle();
+    server.open();
+    expect(server.querySet()).toHaveLength(1);
+    frame.run(() => loadNote.abort("cancelled"));
+    await expect(loaded).rejects.toThrow();
+    await settle();
+    expect(server.querySet()).toEqual([]);
+    await frame.run(() => convex.close());
+  });
+
+  test("an abort while arguments resolve subscribes nothing", async () => {
+    const frame = context.start();
+    const convex = reatomConvexClient(URL, clientOptions(server));
+    let release!: () => void;
+    const loadNote = action(async (id: number) => {
+      await wrap(new Promise<void>((resolve) => (release = resolve)));
+      return { id };
+    }, "loadNote").extend(withConvexQuery(convex, get), withAbort());
+    const loaded = frame.run(() => loadNote(1));
+    frame.run(() => loadNote.abort("cancelled"));
+    release();
+    await expect(loaded).rejects.toThrow();
+    await settle();
+    // Nothing subscribed, so the client never connected.
+    expect(() => server.socket).toThrow("no socket");
+    await frame.run(() => convex.close());
+  });
+
   test("checks what the action returns", () => {
     const convex = reatomConvexClientFake();
     expectTypeOf(
@@ -631,6 +668,93 @@ describe("updateQuery", () => {
     release();
     await expect(done).resolves.toBe("a");
     frame.run(() => expect(notes.data()).toEqual(["a"]));
+  });
+
+  test("binds the client and query arguments of the call, not of resolved arguments", async () => {
+    const frame = context.start();
+    const first = reatomConvexClientFake("first");
+    const second = reatomConvexClientFake("second");
+    const current = atom(first, "client");
+    const id = atom(1, "id");
+    const releases: Array<() => void> = [];
+    frame.run(() => {
+      for (const convex of [first, second]) {
+        convex.handleQuery(
+          get,
+          ({ id }) => `${convex === first ? "first" : "second"} ${id}`,
+        );
+        convex.handleMutation(add, async ({ text }) => {
+          await wrap(new Promise<void>((resolve) => releases.push(resolve)));
+          return text;
+        });
+      }
+    });
+    const note = computed(() => ({ id: id() }), "note").extend(
+      withConvexQuery(() => current(), get),
+    );
+    let resolveArgs!: (args: { text: string }) => void;
+    const addNote = action(
+      () => new Promise<{ text: string }>((resolve) => (resolveArgs = resolve)),
+      "addNote",
+    ).extend(
+      withConvexMutation(() => current(), add, {
+        optimisticUpdate: updateQuery(
+          note,
+          (value, { text }) => `${value} ${text}`,
+        ),
+      }),
+    );
+    const done = frame.run(() => addNote());
+    frame.run(() => {
+      current.set(second);
+      id.set(2);
+    });
+    resolveArgs({ text: "optimistic" });
+    await settle();
+    frame.run(() => {
+      expect(first.query(get, { id: 1 }).data()).toBe("first 1 optimistic");
+      expect(note.data()).toBe("second 2");
+    });
+    expect(releases).toHaveLength(1);
+    releases[0]();
+    await expect(done).resolves.toBe("optimistic");
+  });
+
+  test("replays a fake's pending update over a query opened after another read", async () => {
+    const frame = context.start();
+    const convex = reatomConvexClientFake();
+    let release!: () => void;
+    frame.run(() => {
+      convex.handleQuery(list, ({ tag }) => [tag ?? "base"]);
+      convex.handleQuery(get, ({ id }) => String(id));
+      convex.handleMutation(add, async ({ text }) => {
+        await wrap(new Promise<void>((resolve) => (release = resolve)));
+        return text;
+      });
+    });
+    const unrelated = atom({ id: 1 }, "unrelated").extend(
+      withConvexQuery(convex, get),
+    );
+    const notes = atom({}, "notes").extend(withConvexQuery(convex, list));
+    const addNote = action((text: string) => ({ text }), "addNote").extend(
+      withConvexMutation(convex, add, {
+        optimisticUpdate: (store, { text }) => {
+          const current = store.getQuery(list, {});
+          if (current !== undefined)
+            store.setQuery(list, {}, [...current, text]);
+        },
+      }),
+    );
+    frame.run(() => unrelated.data.subscribe(noop));
+    const done = frame.run(() => addNote("optimistic"));
+    frame.run(() => {
+      expect(unrelated.data()).toBe("1");
+      notes.data.subscribe(noop);
+      expect(notes.data()).toEqual(["base", "optimistic"]);
+    });
+    release();
+    await expect(done).resolves.toBe("optimistic");
+    frame.run(() => expect(notes.data()).toEqual(["base"]));
   });
 
   test("leaves a skipped atom alone", async () => {

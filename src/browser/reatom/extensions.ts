@@ -9,10 +9,11 @@
  * `updateQuery` turns a query atom into an optimistic update for a mutation.
  *
  * Each extension takes the client, or a function that returns it, which it
- * calls when it needs the client: inside the computeds for queries, and on each
- * call for mutations and actions.
+ * calls when it needs the client: inside the computeds for queries, and when
+ * the action is called for mutations, actions and one-shot reads.
  */
 import {
+  abortVar,
   action,
   computed,
   isAction,
@@ -125,8 +126,9 @@ export interface ConvexQueryExt<T> {
 }
 
 /**
- * Options for {@link withConvexQuery}: the query's journal and, for an action,
- * the options of `withAsync`.
+ * Options for {@link withConvexQuery}: the query's journal, `keepPreviousData`
+ * for an atom and the options of `withAsync` for an action. Options for the
+ * other target are ignored.
  *
  * @public
  */
@@ -155,22 +157,39 @@ type ConvexQueryExtension<Target, Query> = [Target] extends [
         withConvexQuery_ERROR: "The atom's state should be the query's arguments or \"skip\"";
       };
 
-/** Resolves with the entry's first result, keeping it subscribed until then. */
+/**
+ * Resolves with the entry's first result, keeping it subscribed until then. An
+ * abort of the calling frame, as `withAbort` does, rejects and unsubscribes.
+ */
 const firstResult = (entry: ReatomQuery): Promise<Value> =>
   new Promise((resolve, reject) => {
     let settled = false;
     let unsubscribe: (() => void) | undefined;
+    let abort: { unsubscribe: () => void } | undefined;
+    const finish = () => {
+      settled = true;
+      unsubscribe?.();
+      abort?.unsubscribe();
+    };
+    abort = abortVar.subscribe((error) => {
+      if (settled) return;
+      finish();
+      reject(error);
+    });
+    if (settled) {
+      abort.unsubscribe();
+      return;
+    }
     unsubscribe = entry.result.subscribe(
       (result: FunctionResult | undefined) => {
         if (result === undefined || settled) return;
-        settled = true;
-        unsubscribe?.();
+        finish();
         if (result.success) resolve(result.value);
         else reject(functionError("query", entry.udfPath, result));
       },
     );
     // A result already held settles during `subscribe`.
-    if (settled) unsubscribe();
+    if (settled) finish();
   });
 
 /**
@@ -191,7 +210,8 @@ const firstResult = (entry: ReatomQuery): Promise<Value> =>
  * On an action that returns the query's arguments, reads the query once, as
  * `ConvexClient.query` does: the action subscribes it until the first result
  * and returns a promise of it, with `withAsync`'s state. A query another
- * reader holds resolves with its current result.
+ * reader holds that already has a result resolves with it. An abort of the
+ * call, as `withAbort` does, rejects and unsubscribes.
  *
  * ```ts
  * const loadNote = action((id: Id<"notes">) => ({ id }), "loadNote").extend(
@@ -218,9 +238,10 @@ export function withConvexQuery<Query extends QueryRef>(
     if (isAction(target)) {
       return target.extend(
         withActionMiddleware(() =>
-          callWith((args) =>
-            firstResult(clientOf(client).query(query, args, options)),
-          ),
+          callWith(() => {
+            const convex = clientOf(client);
+            return (args) => firstResult(convex.query(query, args, options));
+          }),
         ),
         withAsync(options),
       );
@@ -629,11 +650,16 @@ export type ConvexActionOptions<
   EmptyErr = undefined,
 > = AsyncOptions<Err, EmptyErr>;
 
-/** Calls `run` with what the action's callback returned, awaited if needed. */
+/**
+ * Calls the function `bind` returns with what the action's callback returned,
+ * awaited if needed. `bind` runs right after the callback, so the client and
+ * optimistic updates are those of the call, not of when its arguments resolve.
+ */
 const callWith =
-  (run: (args: any) => Promise<unknown>) =>
+  (bind: () => (args: any) => Promise<unknown>) =>
   (next: (...params: any[]) => unknown, ...params: any[]) => {
     const args = next(...params);
+    const run = bind();
     if (!(args instanceof Promise)) return run(args);
     return (async () => run(await wrap(args)))();
   };
@@ -676,11 +702,12 @@ export function withConvexMutation<
   return (target) =>
     (target as Action).extend(
       withActionMiddleware(() =>
-        callWith((args) =>
-          clientOf(client).mutation(mutation, args, {
-            optimisticUpdate: optimisticFor(optimisticUpdate),
-          }),
-        ),
+        callWith(() => {
+          const convex = clientOf(client);
+          const update = optimisticFor(optimisticUpdate);
+          return (args) =>
+            convex.mutation(mutation, args, { optimisticUpdate: update });
+        }),
       ),
       withAsync(asyncOptions),
     ) as any;
@@ -720,7 +747,10 @@ export function withConvexAction<
   return (target) =>
     (target as Action).extend(
       withActionMiddleware(() =>
-        callWith((args) => clientOf(client).action(convexAction, args)),
+        callWith(() => {
+          const convex = clientOf(client);
+          return (args) => convex.action(convexAction, args);
+        }),
       ),
       withAsync(options),
     ) as any;
