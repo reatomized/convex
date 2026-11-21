@@ -12,7 +12,7 @@ npm install @reatomized/convex convex @reatom/core
 
 `convex` and `@reatom/core` are peer dependencies. The client takes function
 references and `ConvexError` from your `convex`, and its atoms live in your
-app's Reatom context. It speaks the sync protocol of convex 1.50.0.
+app's Reatom context. It speaks the sync protocol of convex 1.51.0.
 
 ## Usage
 
@@ -306,7 +306,7 @@ installs from a URL only with `--allow-remote`):
 npm install --allow-remote=root @reatom/core@https://pkg.pr.new/@reatom/core@5f42184
 ```
 
-Convex 1.50.0 requires Node 22 or later, which has a global `WebSocket`.
+Convex 1.51.0 requires Node 22 or later, which has a global `WebSocket`.
 
 ## Differences from convex/browser
 
