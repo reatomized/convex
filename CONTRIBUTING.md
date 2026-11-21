@@ -143,16 +143,25 @@ mount is 11.5 ms for convex/react, 13.6 ms with @reatom/react and 5.98 ms with
 ## Syncing with upstream
 
 `main` mirrors convex-js and holds nothing else, so branches for upstream PRs
-start from it. To take upstream changes into `reatom`, update `main`, check out
-upstream's version of every upstream file on `reatom`, and run the checks:
+start from it. To take upstream changes into `reatom`, update `main`, merge
+`upstream/main` into a branch from `reatom` with the `ours` strategy, check out
+upstream's version of every upstream file, run the checks, and commit the merge:
 
 ```sh
 git fetch upstream
 git push origin upstream/main:main
+git switch -c sync-upstream origin/reatom
+git merge -s ours --no-commit upstream/main
 git checkout upstream/main -- $(git ls-files src ':!src/browser/reatom')
 node scripts/peer-imports.mjs
 npm run typecheck && npm test && npm run build
+git commit -m "Merge convex-js <version> into reatom"
 ```
+
+The `ours` merge records upstream's commits as merged without taking upstream's
+tree, so GitHub no longer counts `reatom` as behind `convex/convex-js:main`; the
+checkout then takes upstream's files. Merge the sync PR with a merge commit,
+never squash or rebase, or `reatom` loses the upstream parent.
 
 `peer-imports.mjs` changes only import and export specifiers that point at
 upstream's `src/server` or `src/values`, including import types and dynamic
