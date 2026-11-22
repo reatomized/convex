@@ -6,7 +6,8 @@
  * `withConvexMutation`, `withConvexAction` and `withConvexQuery` go on an action
  * that returns the function's arguments; the action then calls the function,
  * or reads the query once, and returns its promise, with `withAsync`'s state.
- * `updateQuery` turns a query atom into an optimistic update for a mutation.
+ * `updateQuery` turns a query atom into an optimistic update for a mutation,
+ * `updateStore` an update of the local store.
  *
  * Each extension takes the client, or a function that returns it, which it
  * calls when it needs the client: inside the computeds for queries, and when
@@ -469,15 +470,17 @@ export type ConvexPagePosition = {
 };
 
 /**
- * An optimistic update of one query atom, made by {@link updateQuery}.
+ * An optimistic update for `withConvexMutation`, made by {@link updateQuery}
+ * or {@link updateStore}.
  *
  * @public
  */
 export interface ConvexOptimisticUpdate<Args> {
   /**
-   * The update for the atom's current arguments, `undefined` while it holds
-   * `"skip"`. `withConvexMutation` calls it when the mutation is called, so
-   * the update keeps those arguments while the mutation is pending.
+   * The update of the local store, `undefined` when there is nothing to
+   * update, such as a query atom holding `"skip"`. `withConvexMutation` calls
+   * it when the mutation is called, so a query atom's update keeps the atom's
+   * arguments of that moment while the mutation is pending.
    */
   readonly bind: () =>
     | ((localQueryStore: OptimisticLocalStore, args: Args) => void)
@@ -485,18 +488,18 @@ export interface ConvexOptimisticUpdate<Args> {
 }
 
 /**
- * What `withConvexMutation` takes as `optimisticUpdate`: an update of the local
- * store, query atom updates from {@link updateQuery}, or a list of both.
+ * What `withConvexMutation` takes as `optimisticUpdate`: an update from
+ * {@link updateQuery} or {@link updateStore}, or a list of them.
+ *
+ * Every form is an object: TypeScript 6 and later infer the helpers' `Args`
+ * from this type only while none of its members has a call signature, and
+ * fall back to `any` otherwise.
  *
  * @public
  */
 export type ConvexOptimisticUpdates<Args> =
-  | ((localQueryStore: OptimisticLocalStore, args: Args) => void)
   | ConvexOptimisticUpdate<Args>
-  | ReadonlyArray<
-      | ((localQueryStore: OptimisticLocalStore, args: Args) => void)
-      | ConvexOptimisticUpdate<Args>
-    >;
+  | ReadonlyArray<ConvexOptimisticUpdate<Args>>;
 
 type StoreUpdate = (localQueryStore: OptimisticLocalStore, args: any) => void;
 
@@ -606,16 +609,40 @@ export function updateQuery(
   };
 }
 
+/**
+ * An optimistic update of the local store for `withConvexMutation`, the
+ * function `convex.mutation` takes as `optimisticUpdate`.
+ *
+ * ```ts
+ * withConvexMutation(convex, api.notes.add, {
+ *   optimisticUpdate: updateStore((store, { text }) => {
+ *     const notes = store.getQuery(api.notes.list, {});
+ *     if (notes) store.setQuery(api.notes.list, {}, [...notes, text]);
+ *   }),
+ * });
+ * ```
+ *
+ * @public
+ */
+export function updateStore<Args>(
+  update: (localQueryStore: OptimisticLocalStore, args: Args) => void,
+): ConvexOptimisticUpdate<Args> {
+  return { bind: () => update };
+}
+
 /** The optimistic update of one call, with query atoms bound to their arguments. */
 const optimisticFor = (
   updates: ConvexOptimisticUpdates<any> | undefined,
 ): StoreUpdate | undefined => {
   if (updates === undefined) return undefined;
-  const list: ReadonlyArray<StoreUpdate | ConvexOptimisticUpdate<any>> =
-    Array.isArray(updates) ? updates : [updates as StoreUpdate];
+  const list: ReadonlyArray<ConvexOptimisticUpdate<any>> = Array.isArray(
+    updates,
+  )
+    ? updates
+    : [updates as ConvexOptimisticUpdate<any>];
   const bound: StoreUpdate[] = [];
   for (const update of list) {
-    const fn = typeof update === "function" ? update : update.bind();
+    const fn = update.bind();
     if (fn) bound.push(fn);
   }
   if (bound.length <= 1) return bound[0];
