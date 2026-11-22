@@ -25,10 +25,12 @@ import {
   type PaginationOptions,
   type PaginationResult,
 } from "convex/server";
+import type { OptimisticLocalStore } from "convex/browser";
 import { ConvexError } from "convex/values";
 import { reatomConvexClient, type ReatomQuery } from "./client.js";
 import {
   updateQuery,
+  updateStore,
   withConvexAction,
   withConvexMutation,
   withConvexPaginatedQuery,
@@ -299,10 +301,10 @@ describe("withConvexMutation", () => {
       "addNote",
     ).extend(
       withConvexMutation(convex, add, {
-        optimisticUpdate: (store, { text }) => {
+        optimisticUpdate: updateStore((store, { text }) => {
           const current = store.getQuery(list, {});
           if (current) store.setQuery(list, {}, [...current, text]);
-        },
+        }),
       }),
     );
     frame.run(() => notes.data.subscribe(noop));
@@ -408,7 +410,13 @@ describe("withConvexMutation", () => {
     );
     withConvexMutation(convex, add, {
       // @ts-expect-error The update gets the mutation's arguments.
-      optimisticUpdate: (_store, { body }: { body: string }) => body,
+      optimisticUpdate: updateStore((_store, { body }: { body: string }) => {
+        void body;
+      }),
+    });
+    withConvexMutation(convex, add, {
+      // @ts-expect-error A store update goes through updateStore.
+      optimisticUpdate: (_store: unknown, _args: { text: string }) => {},
     });
   });
 });
@@ -562,7 +570,7 @@ describe("updateQuery", () => {
     const addNote = action((text: string) => ({ text }), "addNote").extend(
       withConvexMutation(convex, add, {
         optimisticUpdate: [
-          (_store, args) => calls.push(args),
+          updateStore((_store, args) => calls.push(args)),
           updateQuery(notes, (current, { text }) => [...current, text]),
         ],
       }),
@@ -738,11 +746,11 @@ describe("updateQuery", () => {
     const notes = atom({}, "notes").extend(withConvexQuery(convex, list));
     const addNote = action((text: string) => ({ text }), "addNote").extend(
       withConvexMutation(convex, add, {
-        optimisticUpdate: (store, { text }) => {
+        optimisticUpdate: updateStore((store, { text }) => {
           const current = store.getQuery(list, {});
           if (current !== undefined)
             store.setQuery(list, {}, [...current, text]);
-        },
+        }),
       }),
     );
     frame.run(() => unrelated.data.subscribe(noop));
@@ -802,8 +810,49 @@ describe("updateQuery", () => {
       ],
     });
     withConvexMutation(convex, add, {
+      optimisticUpdate: updateStore((store, args) => {
+        expectTypeOf(store).toEqualTypeOf<OptimisticLocalStore>();
+        expectTypeOf(args).toEqualTypeOf<{ text: string }>();
+      }),
+    });
+    withConvexMutation(convex, add, {
       // @ts-expect-error notes:list holds strings.
       optimisticUpdate: updateQuery(notes, () => [1]),
+    });
+  });
+
+  test("rejects a name or type the mutation's arguments don't have", () => {
+    const convex = reatomConvexClientFake();
+    const notes = atom({}, "notes").extend(withConvexQuery(convex, list));
+    const pages = atom({ tag: "a" }, "pages").extend(
+      withConvexPaginatedQuery(convex, page, { initialNumItems: 1 }),
+    );
+    withConvexMutation(convex, add, {
+      // @ts-expect-error notes:add takes `text`, not `body`.
+      optimisticUpdate: updateQuery(notes, (current, { body }) => [
+        ...current,
+        String(body),
+      ]),
+    });
+    withConvexMutation(convex, add, {
+      optimisticUpdate: updateQuery(notes, (current, { text }) => {
+        // @ts-expect-error `text` is a string.
+        const length: number = text;
+        return current.slice(length);
+      }),
+    });
+    withConvexMutation(convex, add, {
+      optimisticUpdate: [
+        // @ts-expect-error notes:add takes `text`, not `body`.
+        updateQuery(pages, (items, { body }) => [...items, Number(body)]),
+        updateQuery(pages, (items, { text }) => {
+          // @ts-expect-error `text` is a string.
+          const n: number = text;
+          return [...items, n];
+        }),
+        // @ts-expect-error notes:add takes `text`, not `body`.
+        updateStore((_store, { body }) => void body),
+      ],
     });
   });
 });

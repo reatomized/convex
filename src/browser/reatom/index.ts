@@ -13,6 +13,7 @@ export type {
 } from "./client.js";
 export {
   updateQuery,
+  updateStore,
   withConvexAction,
   withConvexMutation,
   withConvexPaginatedQuery,

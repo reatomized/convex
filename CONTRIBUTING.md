@@ -93,6 +93,9 @@ the differences the README lists.
 `src/browser/reatom/client.test.ts` covers the Reatom API.
 `src/browser/reatom/extensions.test.ts` runs the extensions on the real client,
 over the scripted server, and on the fake, and checks their inferred types.
+`npm run typecheck` also checks the root project with TypeScript 6, the
+`typescript6` dev dependency, because it infers some types differently from the
+pinned 5.0, such as the mutation's arguments in `updateQuery`.
 `src/browser/reatom/testing.test.ts` covers the fakes and runs one consumer
 model on both the real client, over the scripted server, and the fake.
 `packages/convex-storybook/test` checks the addon's inferred `parameters`, like
