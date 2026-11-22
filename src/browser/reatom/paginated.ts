@@ -10,6 +10,7 @@ import {
   atom,
   computed,
   noop,
+  reset,
   withComputed,
   type Action,
   type Atom,
@@ -211,6 +212,9 @@ export function reatomPaginatedQuery(
     }),
     // Like `PaginatedQueryClient`, forget loaded pages once unused.
     withConnectionHooks(noop, () => {
+      // Setting an atom with dependencies only stores the value. Without
+      // them, the set derives the list again, from the first page.
+      reset(pages);
       pages.set(null);
     }),
   );

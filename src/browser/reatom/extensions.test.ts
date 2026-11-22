@@ -274,6 +274,72 @@ describe("withConvexPaginatedQuery", () => {
     });
   });
 
+  test.each([false, true])(
+    "starts over once resubscribed, keepPreviousData: %s",
+    async (keepPreviousData) => {
+      const frame = context.start();
+      const convex = reatomConvexClientFake();
+      frame.run(() =>
+        convex.handleQuery(page, ({ paginationOpts }) =>
+          paginate([1, 2, 3], paginationOpts),
+        ),
+      );
+      const notes = atom({ tag: "a" }, "notes").extend(
+        withConvexPaginatedQuery(convex, page, {
+          initialNumItems: 1,
+          keepPreviousData,
+        }),
+      );
+      let unsubscribe = frame.run(() => notes.results.subscribe(noop));
+      frame.run(() => {
+        expect(notes.loadMore(1)).toBe(true);
+        expect(notes.results()).toEqual([1, 2]);
+      });
+      unsubscribe();
+      await settle();
+      unsubscribe = frame.run(() => notes.results.subscribe(noop));
+      frame.run(() => {
+        expect(notes.results()).toEqual([1]);
+        expect(notes.loadMore(1)).toBe(true);
+        expect(notes.results()).toEqual([1, 2]);
+      });
+      unsubscribe();
+    },
+  );
+
+  test.each([false, true])(
+    "starts over on arguments it left, keepPreviousData: %s",
+    async (keepPreviousData) => {
+      const frame = context.start();
+      const convex = reatomConvexClientFake();
+      frame.run(() =>
+        convex.handleQuery(page, ({ tag, paginationOpts }) =>
+          paginate(tag === "a" ? [1, 2, 3] : [4, 5, 6], paginationOpts),
+        ),
+      );
+      const tag = atom("a", "tag");
+      const notes = computed(() => ({ tag: tag() }), "notes").extend(
+        withConvexPaginatedQuery(convex, page, {
+          initialNumItems: 1,
+          keepPreviousData,
+        }),
+      );
+      const unsubscribe = frame.run(() => notes.results.subscribe(noop));
+      frame.run(() => {
+        expect(notes.loadMore(1)).toBe(true);
+        expect(notes.results()).toEqual([1, 2]);
+        tag.set("b");
+        expect(notes.results()).toEqual([4]);
+      });
+      await settle();
+      frame.run(() => {
+        tag.set("a");
+        expect(notes.results()).toEqual([1]);
+      });
+      unsubscribe();
+    },
+  );
+
   test("types the items and the arguments without paginationOpts", () => {
     const convex = reatomConvexClientFake();
     const notes = atom({ tag: "a" }, "notes").extend(
