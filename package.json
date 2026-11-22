@@ -54,7 +54,7 @@
     "changeset": "changeset",
     "version-packages": "changeset version && npm install --package-lock-only --ignore-scripts --allow-remote=root",
     "release": "changeset publish",
-    "typecheck": "tsc --noEmit && npm run typecheck --workspace @reatomized/convex-storybook",
+    "typecheck": "tsc --noEmit && node node_modules/typescript6/bin/tsc --noEmit --types node && npm run typecheck --workspace @reatomized/convex-storybook",
     "test": "vitest run",
     "lint": "eslint ."
   },
@@ -73,6 +73,7 @@
     "happy-dom": "^21.0.4",
     "typescript": "~5.0.3",
     "typescript-eslint": "^8.72.0",
+    "typescript6": "npm:typescript@~6.0.3",
     "vitest": "^5.1.0"
   },
   "publishConfig": {
