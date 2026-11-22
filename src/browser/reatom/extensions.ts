@@ -613,6 +613,12 @@ export function updateQuery(
  * An optimistic update of the local store for `withConvexMutation`, the
  * function `convex.mutation` takes as `optimisticUpdate`.
  *
+ * The wrapper keeps functions out of {@link ConvexOptimisticUpdates}. A
+ * helper such as {@link updateQuery} gets `Args` only from the type its
+ * result is passed to, and TypeScript 6 and later skip that inference when a
+ * member of that type has a call signature, typing the mutation's arguments
+ * as `any`.
+ *
  * ```ts
  * withConvexMutation(convex, api.notes.add, {
  *   optimisticUpdate: updateStore((store, { text }) => {

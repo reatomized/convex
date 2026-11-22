@@ -150,8 +150,10 @@ const loaded = await wrap(loadNote(id));
 `optimisticUpdate` takes `updateQuery(atom, update)`,
 `updateStore((store, args) => ...)`, or a list of them. `updateStore` wraps the
 function of the local store and the mutation's arguments that `convex.mutation`
-takes. Both helpers get `args` typed from the mutation, including on TypeScript
-6 and 7. `updateQuery` changes the query an extended atom holds:
+takes. Both helpers get `args` typed from the mutation. A helper's `args` type
+comes only from the option it is passed to, and TypeScript 6 and 7 don't infer
+it when that option also accepts a function, so a store function goes through
+`updateStore` too. `updateQuery` changes the query an extended atom holds:
 
 - For `withConvexQuery`, `update(current, args, store)` returns the new value.
 - For `withConvexPaginatedQuery`, `update(page, args, { first, last }, store)`
